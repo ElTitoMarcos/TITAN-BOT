@@ -1,0 +1,8 @@
+ttkbootstrap>=1.10
+ccxt>=4.0.0
+websocket-client>=1.6
+pandas>=2.0
+numpy>=1.25
+matplotlib>=3.8
+
+openai>=1.40.0
