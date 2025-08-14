@@ -36,20 +36,33 @@ class App(tb.Window):
             # re-enable API widgets
             key_name = str(self.var_bin_key) if hasattr(self, "var_bin_key") else None
             sec_name = str(self.var_bin_sec) if hasattr(self, "var_bin_sec") else None
+            oai_name = str(self.var_oai_key) if hasattr(self, "var_oai_key") else None
             for w in self._iter_all_widgets():
                 try:
                     if w.winfo_class() in ("TEntry","Entry"):
                         tv = w.cget("textvariable") if "textvariable" in w.keys() else ""
-                        if tv in (key_name, sec_name):
+                        if tv in (key_name, sec_name, oai_name):
                             w.configure(state="normal")
                     if w.winfo_class() in ("TButton","Button"):
                         txt = w.cget("text") if "text" in w.keys() else ""
-                        if "Aplicar Binance" in str(txt):
+                        if any(lbl in str(txt) for lbl in ("Aplicar Binance", "Aplicar ChatGPT")):
                             w.configure(state="normal")
                 except Exception:
                     pass
         except Exception:
             pass
+
+    def _maybe_unlock_controls(self):
+        key = self.var_bin_key.get().strip() if hasattr(self, "var_bin_key") else ""
+        sec = self.var_bin_sec.get().strip() if hasattr(self, "var_bin_sec") else ""
+        oai = self.var_oai_key.get().strip() if hasattr(self, "var_oai_key") else ""
+        if key and sec and oai:
+            try:
+                self._ensure_exchange()
+                self.exchange.load_markets()
+                self._lock_controls(False)
+            except Exception:
+                pass
     
     def __init__(self):
         super().__init__(title="AutoBTC - Punto a Punto", themename="cyborg")
@@ -81,10 +94,8 @@ class App(tb.Window):
         self.rowconfigure(1, weight=1)
         try:
             self._ensure_exchange()
-            if not self.exchange.is_live_ready():
-                self._lock_controls(True)
         except Exception:
-            self._lock_controls(True)
+            pass
 
         # Header
         header = ttk.Frame(self, padding=10)
@@ -258,6 +269,7 @@ class App(tb.Window):
         self.var_bot_sim.trace_add("write", self._on_bot_sim)
         self.var_bot_live.trace_add("write", self._on_bot_live)
         self.var_live_confirm.trace_add("write", self._on_live_confirm)
+        self._lock_controls(True)
         self.tree.bind("<<TreeviewSelect>>", lambda e: self._update_min_marker())
 
     # ------------------- Helpers -------------------
@@ -382,11 +394,7 @@ class App(tb.Window):
         if self._engine_sim: self._engine_sim.exchange.set_api_keys(key, sec)
         if self._engine_live: self._engine_live.exchange.set_api_keys(key, sec)
         self.log_append("[ENGINE] Claves de Binance aplicadas.")
-        try:
-            # prueba carga y desbloquea
-            self.exchange.load_markets(); self._lock_controls(False)
-        except Exception:
-            pass
+        self._maybe_unlock_controls()
 
     def _apply_openai_key(self):
         k = self.var_oai_key.get().strip()
@@ -397,6 +405,7 @@ class App(tb.Window):
             self._engine_live.llm.set_api_key(k)
             self._engine_live.cfg.openai_api_key = k
         self.log_append("[LLM] Clave de ChatGPT aplicada.")
+        self._maybe_unlock_controls()
 
     def _apply_llm(self):
         if self._engine_sim:
