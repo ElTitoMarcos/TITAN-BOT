@@ -49,12 +49,12 @@ class LLMClient:
         client = self._openai
         cfg = snapshot.get("config", {})
         max_actions = int(cfg.get("max_actions_per_cycle", 6))
-        fee = float(cfg.get("opportunity_threshold_percent", 0.2)) * 100.0
+        fee_bps = float(cfg.get("opportunity_threshold_percent", 0.2)) * 100.0
 
         sys_msg = (
             "Eres un asistente de trading cuantitativo. "
             "Decide ÚNICAMENTE con los datos del snapshot. "
-            "Respeta límites de riesgo y umbral de oportunidad. "
+            f"Respeta límites de riesgo y un umbral mínimo de oportunidad de {fee_bps:.1f} bps. "
             f"No emitas más de {max_actions} acciones. "
             "Prefiere límites tipo maker si spread lo permite. "
             "Responde en JSON con el campo 'actions'."
