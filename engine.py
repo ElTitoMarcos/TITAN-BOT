@@ -120,13 +120,15 @@ class Engine(threading.Thread):
 
     # --------------------- Núcleo ---------------------
     def _find_candidates(self, snapshot: Dict[str, Any]) -> List[Dict[str, Any]]:
-        thr = float(snapshot["config"]["opportunity_threshold_percent"])
+        """Selecciona pares cuyo movimiento de 1 satoshi supera el coste de comisiones."""
+        fee = float(snapshot.get("config", {}).get("fee_per_side", 0.0))
+        thr_pct = fee * 2.0 * 100.0
         cands: List[Dict[str, Any]] = []
         for p in snapshot.get("pairs", []):
-            score = float(p.get("score", 0.0))
-            edge = float(p.get("edge_est_bps", 0.0))
-            pct = float(p.get("pct_change_window", 0.0))
-            if score >= 60.0 and edge >= thr*100.0 and pct >= thr:
+            mid = float(p.get("mid") or p.get("price_last") or 0.0)
+            tick_pct = (1e-8 / mid * 100.0) if mid else 0.0
+            p["tick_pct_sat"] = tick_pct
+            if tick_pct > thr_pct:
                 cands.append(p)
         return cands
 
@@ -174,17 +176,11 @@ class Engine(threading.Thread):
             self.state.balance_usd = max(self.state.balance_usd, 1000.0)
         self._sim_mark_to_market(pairs)
 
-        
         # ---- Selección de candidatos (antes de construir snapshot) ----
-        thr = float(self.cfg.opportunity_threshold_percent)
-        candidates = []
-        for _p in pairs:
-            score = float(_p.get("score", 0.0) or 0.0)
-            edge = float(_p.get("edge_est_bps", 0.0) or 0.0)
-            pct  = float(_p.get("pct_change_window", 0.0) or 0.0)
-            if score >= 60.0 and edge >= (thr * 100.0) and pct >= thr:
-                candidates.append(_p)
-        # Fallback: si no hay candidatos, usa el top-5 por score
+        candidates = self._find_candidates({
+            "pairs": pairs,
+            "config": {"fee_per_side": self.cfg.fee_per_side},
+        })
         if not candidates:
             candidates = pairs[:5]
         snap = {
@@ -363,9 +359,9 @@ def _log_audit(self, event: str, sym: str, detail: str):
         if self.mode == "LIVE" and not self.exchange.is_live_ready():
             reasons.append("No LIVE: faltan API keys de Binance.")
         if not candidates and open_count == 0:
-            reasons.append("Sin candidatos (score/edge/%reciente) y sin órdenes abiertas; no llamo al LLM.")
+            reasons.append("Sin candidatos (1 sat ≤ 2× comisión) y sin órdenes abiertas; no llamo al LLM.")
         if not actions and (candidates or open_count):
-            reasons.append("LLM no propuso acciones (score/edge insuficientes o timeout).")
+            reasons.append("LLM no propuso acciones (tick/comisión insuficiente o timeout).")
         if snapshot.get("pairs") == []:
             reasons.append("No hay pares disponibles en el universo */BTC.")
         return reasons
@@ -384,7 +380,8 @@ def _log_audit(self, event: str, sym: str, detail: str):
                 self._try_fill_sim_orders(snapshot)
 
                 open_count = len(snapshot.get("open_orders", []))
-                candidates = self._find_candidates(snapshot)(snapshot)
+                # Determina los pares candidatos usando el snapshot actual
+                candidates = self._find_candidates(snapshot)
 
                 do_call = False
                 if not self._first_call_done and ((snapshot.get('pairs') and len(snapshot.get('pairs'))>0) or open_count):
