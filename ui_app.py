@@ -638,29 +638,6 @@ class App(tb.Window):
         self.after(500, self._tick_ui_refresh)
 
     def _refresh_market_table(self, pairs: List[Dict[str, Any]], candidates: List[Dict[str, Any]]):
-        cand_syms = {c.get("symbol") for c in candidates}
-        existing = {}
-        for iid in self.tree.get_children():
-            sym_val = self.tree.set(iid, "symbol").replace("★ ", "")
-            existing[sym_val] = iid
-        for p in pairs:
-            sym = p.get("symbol", "")
-            display_sym = f"★ {sym}" if sym in cand_syms else sym
-            values = (
-                display_sym,
-                f"{p.get('score',0.0):.1f}",
-                f"{p.get('pct_change_window',0.0):+.2f}",
-                self._fmt_sats(p.get('price_last',0.0)),
-                f"{(p.get('spread_abs',0.0)/(p.get('mid',1.0) or 1.0))*1e4:.1f}",
-                f"{p.get('depth',{}).get('buy',0.0)/1000:.1f}",
-                f"{p.get('depth',{}).get('sell',0.0)/1000:.1f}",
-                f"{p.get('imbalance',0.5):.2f}",
-            )
-            item = existing.pop(sym, None)
-            if item:
-                self.tree.item(item, values=values)
-            else:
-                item = self.tree.insert("", "end", values=values)
             try:
                 sc = float(p.get('score',0.0))
                 tag = 'scoreLow'
