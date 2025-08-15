@@ -113,6 +113,7 @@ class App(tb.Window):
         self._lock_controls(True)
         self.after(250, self._poll_log_queue)
         self.after(4000, self._tick_ui_refresh)
+
         # Precarga de mercado y balance
         self._warmup_thread = threading.Thread(target=self._warmup_load_market, daemon=True)
         self._warmup_thread.start()
@@ -165,6 +166,7 @@ class App(tb.Window):
             "trend_w","trend_d","trend_h","trend_m",
             "pressure","flow","depth_buy","depth_sell",
             "momentum","spread","micro_vol",
+
         )
         self.tree = ttk.Treeview(frm_mkt, columns=cols, show="headings")
         style = tb.Style(); style.configure("Treeview", font=("Consolas", 10))
@@ -193,6 +195,7 @@ class App(tb.Window):
         vsb = ttk.Scrollbar(frm_mkt, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=vsb.set)
         self.tree.grid(row=0, column=0, sticky="nsew"); vsb.grid(row=0, column=1, sticky="ns")
+
         # Colores por score (fino) en texto
         self.tree.tag_configure('score95', foreground='#166534')
         self.tree.tag_configure('score90', foreground='#15803d')
@@ -325,6 +328,7 @@ class App(tb.Window):
         # Métricas de Score
         frm_met = ttk.Labelframe(right, text="Métricas Score", padding=8)
         frm_met.grid(row=6, column=0, sticky="ew", pady=6)
+
         for idx, (key, label) in enumerate([
             ("trend_w", "Trend semanal"),
             ("trend_d", "Trend diaria"),
@@ -386,13 +390,15 @@ class App(tb.Window):
     def _warmup_load_market(self):
         try:
             self._ensure_exchange()
-            uni = self.exchange.fetch_universe("BTC")[:100]
+            uni = self.exchange.fetch_universe(None)[:100]
+
             if uni:
                 pairs = self.exchange.fetch_top_metrics(uni[: min(20, len(uni))])
                 try:
                     self.exchange.ensure_collector([p['symbol'] for p in pairs], interval_ms=800)
                 except Exception:
                     pass
+
                 store = self.exchange.market_summary_for([p['symbol'] for p in pairs])
                 trends = self.exchange.fetch_trend_metrics([p['symbol'] for p in pairs])
                 for p in pairs:
@@ -439,7 +445,8 @@ class App(tb.Window):
     def _refresh_market_candidates(self):
         try:
             self._ensure_exchange()
-            uni = self.exchange.fetch_universe("BTC")[:100]
+            uni = self.exchange.fetch_universe(None)[:100]
+
             if not uni:
                 return
             pairs = self.exchange.fetch_top_metrics(uni[: min(20, len(uni))])
@@ -450,6 +457,7 @@ class App(tb.Window):
             store = self.exchange.market_summary_for([p['symbol'] for p in pairs])
             trends = self.exchange.fetch_trend_metrics([p['symbol'] for p in pairs])
             cands: List[Dict[str, Any]] = []
+
             for p in pairs:
                 ms = store.get(p['symbol'], {})
                 tr = trends.get(p['symbol'], {})
@@ -495,6 +503,7 @@ class App(tb.Window):
                 p['is_candidate'] = True
                 cands.append(p)
             cands.sort(key=lambda x: x.get('score',0.0), reverse=True)
+
             if not ((self._engine_sim and self._engine_sim.is_alive()) or (self._engine_live and self._engine_live.is_alive())):
                 self._snapshot = {**self._snapshot, "pairs": pairs, "candidates": cands}
             self._refresh_market_table(pairs, cands)
@@ -816,6 +825,7 @@ class App(tb.Window):
         pairs_sorted = sorted(pairs, key=lambda p: p.get("score", 0.0), reverse=True)
         for p in pairs_sorted:
             sym = p.get("symbol", "")
+
             values = (
                 sym,
                 f"{p.get('score',0.0):.1f}",
