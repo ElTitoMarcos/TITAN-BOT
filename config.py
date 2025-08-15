@@ -39,7 +39,7 @@ class Defaults:
     pct_window: str = "1h"  # "24h"|"1h"|"5m"
 
     # Universo / otros
-    universe_quote: str = "BTC"
+    universe_quote: str = "ALL"
     topN: int = 20  # pares que mostramos al LLM / UI
     log_dir: str = "./logs"
     initial_balance_usd: float = 10000.0

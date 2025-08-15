@@ -8,7 +8,7 @@ from llm_client import LLMClient
 class Engine(threading.Thread):
     """
     Motor principal con modos SIM/LIVE.
-    - Snapshot del universo */BTC con WS+REST
+    - Snapshot del universo completo con WS+REST
     - LLM (OpenAI si hay clave; heurística si no)
     - Validación dura y ejecución (SIM/LIVE)
     - Razones cuando no opera
@@ -35,7 +35,8 @@ class Engine(threading.Thread):
         self._last_reasons: List[str] = []
         self._first_call_done: bool = False
         self._last_auto_ts: float = 0.0
-        self._greet_sent: bool = False
+        self._cand_cache: List[Dict[str, Any]] = []
+        self._cand_cache_ts: float = 0.0
 
         os.makedirs(self.cfg.log_dir, exist_ok=True)
         self._audit_file = os.path.join(self.cfg.log_dir, "audit.csv")
@@ -72,9 +73,24 @@ class Engine(threading.Thread):
                 continue
             best_ask = par.get("best_ask", 0.0)
             best_bid = par.get("best_bid", 0.0)
-            if o["side"] == "buy" and best_ask and o["price"] >= best_ask:
-                self._register_fill(o, fill_price=best_ask)
-                to_close.append(oid)
+            if o["side"] == "buy":
+                # Cancel if order price is not the nearest buy to best ask
+                if best_bid and o["price"] < best_bid:
+                    self._open_orders.pop(oid, None)
+                    self._log_audit("CANCEL", sym, "buy not at top bid")
+                    continue
+                bid_qty = par.get("bid_top_qty", 0.0)
+                ask_qty = par.get("ask_top_qty", 0.0)
+                total_qty = bid_qty + ask_qty
+                if total_qty > 0:
+                    if bid_qty <= 0.1 * total_qty:
+                        self._open_orders.pop(oid, None)
+                        self._log_audit("CANCEL", sym, "bid support <=10%")
+                        continue
+                    # if bid_qty >=60% we simply continue monitoring
+                if best_ask and o["price"] >= best_ask:
+                    self._register_fill(o, fill_price=best_ask)
+                    to_close.append(oid)
             elif o["side"] == "sell" and best_bid and o["price"] <= best_bid:
                 self._register_fill(o, fill_price=best_bid)
                 to_close.append(oid)
@@ -128,7 +144,6 @@ class Engine(threading.Thread):
         cands: List[Dict[str, Any]] = []
         self.ui_log(f"[ENGINE {self.name}] Buscando pares buenos (umbral {thr_pct:.4f}% basado en comisiones)")
         for p in snapshot.get("pairs", []):
-            sym = p.get("symbol", "")
             mid = float(p.get("mid") or p.get("price_last") or 0.0)
             tick = float(p.get("tick_size") or 1e-8)
             tick_pct = (tick / mid * 100.0) if mid else 0.0
@@ -136,15 +151,12 @@ class Engine(threading.Thread):
             if tick_pct > thr_pct:
                 p["is_candidate"] = True
                 cands.append(p)
-                self.ui_log(
-                    f"[ENGINE {self.name}] {sym} tick_pct {tick_pct:.4f}% > {thr_pct:.4f}% -> candidato"
-                )
         self.ui_log(f"[ENGINE {self.name}] Candidatos encontrados: {len(cands)}")
         return cands
 
     def build_snapshot(self) -> Dict[str, Any]:
         universe = self.exchange.fetch_universe(self.cfg.universe_quote)[:200]
-        pairs = self.exchange.fetch_top_metrics(universe[: self.cfg.topN])
+        pairs = self.exchange.fetch_top_metrics(universe)
         # Collector for selected symbols
         try:
             self.exchange.ensure_collector([p['symbol'] for p in pairs], interval_ms=800)
@@ -164,9 +176,12 @@ class Engine(threading.Thread):
                 "pct_change_window": p.get("pct_change_window", 0.0),
                 "depth_buy": ms.get("depth_buy", p.get("depth",{}).get("buy",0.0)),
                 "depth_sell": ms.get("depth_sell", p.get("depth",{}).get("sell",0.0)),
+                "best_bid_qty": ms.get("bid_top_qty", p.get("bid_top_qty",0.0)),
+                "best_ask_qty": ms.get("ask_top_qty", p.get("ask_top_qty",0.0)),
+                "trade_flow_buy_ratio": ms.get("trade_flow", {}).get("buy_ratio", p.get("trade_flow", {}).get("buy_ratio", 0.5)),
+                "mid": p.get("mid", 0.0),
                 "spread_bps": p.get("spread_bps", 0.0),
                 "tick_price_bps": p.get("tick_price_bps", 8.0),
-                "trade_flow": p.get("trade_flow", {"buy_ratio": 0.5}),
                 "base_volume": p.get("depth", {}).get("buy", 0.0) + p.get("depth", {}).get("sell", 0.0),
                 "micro_volatility": p.get("micro_volatility", 0.0),
                 "weights": self.cfg.weights,
@@ -174,6 +189,7 @@ class Engine(threading.Thread):
             p["score"] = compute_score(features)
 
         pairs.sort(key=lambda x: (-x.get("score", 0.0), -x.get("edge_est_bps", 0.0)))
+        pairs = pairs[: self.cfg.topN]
 
         try:
             _b = self.exchange.fetch_balances_summary()
@@ -186,13 +202,18 @@ class Engine(threading.Thread):
             self.state.balance_usd = max(self.state.balance_usd, 1000.0)
         self._sim_mark_to_market(pairs)
 
-        # ---- Selección de candidatos (antes de construir snapshot) ----
-        candidates = self._find_candidates({
-            "pairs": pairs,
-            "config": {"fee_per_side": self.cfg.fee_per_side},
-        })
-        
-        self.ui_log(f"[ENGINE {self.name}] Evaluados {len(pairs)} pares; {len(candidates)} candidatos")
+        # ---- Selección de candidatos (cacheada a 30s) ----
+        now = time.monotonic()
+        if now - self._cand_cache_ts >= 30.0:
+            self._cand_cache = self._find_candidates({
+                "pairs": pairs,
+                "config": {"fee_per_side": self.cfg.fee_per_side},
+            })
+            self._cand_cache_ts = now
+            self.ui_log(
+                f"[ENGINE {self.name}] Evaluados {len(pairs)} pares; {len(self._cand_cache)} candidatos"
+            )
+        candidates = list(self._cand_cache)
         snap = {
             "ts": int(time.time()*1000),
             "global_state": {
@@ -384,6 +405,13 @@ def _log_audit(self, event: str, sym: str, detail: str):
         return False
 
     def run(self):
+        try:
+            greet_msg = self.llm.greet("hola")
+            if greet_msg:
+                self.ui_log(f"[LLM] {greet_msg}")
+                self._last_reasons = [f"LLM: {greet_msg}"]
+        except Exception:
+            pass
         while not self.is_stopped():
             try:
                 snapshot = self.build_snapshot()
@@ -425,21 +453,14 @@ def _log_audit(self, event: str, sym: str, detail: str):
                         self._last_auto_ts = now_ms
 
                 actions: List[Dict[str, Any]] = []
+                greet_msg = ""
                 if do_call:
                     try:
                         greet_msg = self.llm.greet("hola")
                         if greet_msg:
                             self.ui_log(f"[LLM] {greet_msg}")
                     except Exception:
-                        pass
-
-                    if self._greet_sent:
-                        llm_out = self.llm.propose_actions({
-                            **snapshot,
-                            "config": {**snapshot["config"], "max_actions_per_cycle": self.cfg.llm_max_actions_per_cycle},
-                        })
-                        actions = llm_out.get("actions", [])
-                    self._greet_sent = True
+                        greet_msg = ""
 
                     llm_out = self.llm.propose_actions({
                         **snapshot,
@@ -455,6 +476,9 @@ def _log_audit(self, event: str, sym: str, detail: str):
                     self._last_reasons = self._compute_reasons(actions, snapshot, candidates, open_count)
                     for r in self._last_reasons:
                         self.ui_log(f"[ENGINE {self.name}] {r}")
+
+                if greet_msg:
+                    self._last_reasons.append(f"LLM: {greet_msg}")
 
                 # Empuja estado nuevo
                 self.ui_push_snapshot(self.build_snapshot())
