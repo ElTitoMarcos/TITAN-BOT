@@ -358,46 +358,38 @@ class App(tb.Window):
         self._engine_sim.cfg.llm_call_interval_ms = secs * 1000
         self._engine_sim.start()
 
-    def _start_engine_live(self):
-        def push_snapshot(snap: Dict[str, Any]):
-            self._snapshot = snap
-        self._ensure_exchange()
-        self._engine_live = Engine(ui_push_snapshot=push_snapshot, ui_log=self.log_append, exchange=self.exchange, name="LIVE")
-        self._engine_live.mode = "LIVE"
-        # tamaño LIVE (mínimo global si toggle ON)
-        if bool(self.var_use_min_live.get()):
-            try:
-                min_usd = self.exchange.global_min_notional_usd()
-<<<<<< codex/fix-binance-minimum-order-and-api-calls-clp4xi
-                usd = float(min_usd) + 0.01
-=======
-<<<<<< codex/fix-binance-minimum-order-and-api-calls-zz7f3g
-                usd = float(min_usd) + 0.01
-=======
-<<<<<< codex/fix-binance-minimum-order-and-api-calls-9nb9vg
-                usd = float(min_usd) + 0.1
-=======
-<<<<<< codex/fix-binance-minimum-order-and-api-calls-63gexs
-                usd = float(min_usd) + 0.01
-=======
-                usd = float(min_usd) + 0.1
->>>>>> main
->>>>>> main
->>>>>> main
->>>>>> main
-                self._engine_live.cfg.size_usd_live = float(usd if usd > 0 else self._engine_live.cfg.size_usd_live)
-                self.var_size_live.set(round(self._engine_live.cfg.size_usd_live, 2))
-                self.ent_size_live.configure(state="disabled")
-                self.lbl_min_marker.configure(text=f"Mínimo permitido por Binance: {min_usd:.2f} USDT")
-            except Exception:
-                pass
-        # LLM
-        self._engine_live.llm.set_model(self.var_llm_model.get())
-        secs = max(1, int(self.var_llm_secs.get()))
-        self._engine_live.cfg.llm_call_interval_ms = secs * 1000
-        # Confirm gate
-        self._engine_live.state.live_confirmed = bool(self.var_live_confirm.get())
-        self._engine_live.start()
+def _start_engine_live(self):
+    def push_snapshot(snap: Dict[str, Any]):
+        self._snapshot = snap
+    self._ensure_exchange()
+    self._engine_live = Engine(
+        ui_push_snapshot=push_snapshot,
+        ui_log=self.log_append,
+        exchange=self.exchange,
+        name="LIVE"
+    )
+    self._engine_live.mode = "LIVE"
+    # tamaño LIVE (mínimo global si toggle ON)
+    if bool(self.var_use_min_live.get()):
+        try:
+            min_usd = self.exchange.global_min_notional_usd()
+            usd = float(min_usd) + 0.1
+            self._engine_live.cfg.size_usd_live = float(
+                usd if usd > 0 else self._engine_live.cfg.size_usd_live
+            )
+            self.var_size_live.set(round(self._engine_live.cfg.size_usd_live, 2))
+            self.ent_size_live.configure(state="disabled")
+            self.lbl_min_marker.configure(text=f"Mínimo permitido por Binance: {min_usd:.2f} USDT")
+        except Exception:
+            pass
+    # LLM
+    self._engine_live.llm.set_model(self.var_llm_model.get())
+    secs = max(1, int(self.var_llm_secs.get()))
+    self._engine_live.cfg.llm_call_interval_ms = secs * 1000
+    # Confirm gate
+    self._engine_live.state.live_confirmed = bool(self.var_live_confirm.get())
+    self._engine_live.start()
+
 
     # ------------------- Actions -------------------
     def _on_toggle_min_live(self):
