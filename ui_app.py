@@ -64,7 +64,7 @@ class App(tb.Window):
         return str(sats)
 
     def _coerce(self, val: str, col: str):
-        v = str(val).replace("★ ", "")
+        v = str(val)
         if col == "symbol":
             return v
         if col == "price_sats":
@@ -109,11 +109,12 @@ class App(tb.Window):
         self._load_saved_keys()
         self._lock_controls(True)
         self.after(250, self._poll_log_queue)
-        self.after(500, self._tick_ui_refresh)
+        self.after(1500, self._tick_ui_refresh)
         # Precarga de mercado y balance
         self._warmup_thread = threading.Thread(target=self._warmup_load_market, daemon=True)
         self._warmup_thread.start()
         self.after(2000, self._tick_balance_refresh)
+        self._last_cand_refresh = 0.0
 
     # ------------------- UI -------------------
     def _build_ui(self):
@@ -192,13 +193,16 @@ class App(tb.Window):
         self.tree.configure(yscrollcommand=vsb.set)
         self.tree.grid(row=0, column=0, sticky="nsew"); vsb.grid(row=0, column=1, sticky="ns")
         # Colores por score (fino) en texto
-        self.tree.tag_configure('score90', foreground='#16a34a')
-        self.tree.tag_configure('score80', foreground='#22c55e')
-        self.tree.tag_configure('score65', foreground='#84cc16')
-        self.tree.tag_configure('score64', foreground='#eab308')
-        self.tree.tag_configure('score59', foreground='#f97316')
-        self.tree.tag_configure('score50', foreground='#f43f5e')
-        self.tree.tag_configure('scoreLow', foreground='#ffffff')
+        self.tree.tag_configure('score95', foreground='#166534')
+        self.tree.tag_configure('score90', foreground='#15803d')
+        self.tree.tag_configure('score80', foreground='#16a34a')
+        self.tree.tag_configure('score70', foreground='#22c55e')
+        self.tree.tag_configure('score60', foreground='#84cc16')
+        self.tree.tag_configure('score50', foreground='#eab308')
+        self.tree.tag_configure('score40', foreground='#f97316')
+        self.tree.tag_configure('score30', foreground='#f43f5e')
+        self.tree.tag_configure('scoreLow', foreground='#b91c1c')
+
         self.tree.tag_configure('veto', background='#ef4444', foreground='white')
         self.tree.tag_configure('candidate', font=('Consolas', 10, 'bold'))
 
@@ -241,6 +245,8 @@ class App(tb.Window):
         right = ttk.Frame(self, padding=(0, 0, 10, 10))
         right.grid(row=1, column=1, sticky="nsew")
         right.columnconfigure(0, weight=1)
+        right.rowconfigure(5, weight=1)
+        right.rowconfigure(6, weight=1)
 
         ttk.Label(right, text="Ajustes").grid(row=0, column=0, sticky="w", pady=(0,6))
 
@@ -297,17 +303,17 @@ class App(tb.Window):
 
         # Info / razones
         frm_info = ttk.Labelframe(right, text="Información / Razones", padding=8)
-        frm_info.grid(row=5, column=0, sticky="nsew", pady=6)
+        frm_info.grid(row=5, column=0, sticky="nsew", pady=(6, 0))
         frm_info.rowconfigure(0, weight=1); frm_info.columnconfigure(0, weight=1)
         self.txt_info = ScrolledText(frm_info, height=12, autohide=True, wrap="word")
         self.txt_info.grid(row=0, column=0, sticky="nsew")
 
-        # Footer log
-        footer = ttk.Labelframe(self, text="Log", padding=10)
-        footer.grid(row=2, column=0, columnspan=2, sticky="ew")
-        footer.columnconfigure(0, weight=1)
-        self.txt_log = ScrolledText(footer, height=6, autohide=True, wrap="none")
-        self.txt_log.grid(row=0, column=0, sticky="ew")
+        # Log debajo de información
+        frm_log = ttk.Labelframe(right, text="Log", padding=8)
+        frm_log.grid(row=6, column=0, sticky="nsew", pady=6)
+        frm_log.rowconfigure(0, weight=1); frm_log.columnconfigure(0, weight=1)
+        self.txt_log = ScrolledText(frm_log, height=6, autohide=True, wrap="none")
+        self.txt_log.grid(row=0, column=0, sticky="nsew")
 
         # Bindings
         self.var_bot_sim.trace_add("write", self._on_bot_sim)
@@ -626,6 +632,11 @@ class App(tb.Window):
         self._refresh_open_orders(snap.get("open_orders", []))
         self._refresh_closed_orders(snap.get("closed_orders", []))
 
+        now = time.time()
+        if now - getattr(self, "_last_cand_refresh", 0) > 15:
+            self._last_cand_refresh = now
+            threading.Thread(target=self._refresh_market_candidates, daemon=True).start()
+
         # Razones
         reasons = snap.get("reasons", [])
         if reasons:
@@ -634,13 +645,13 @@ class App(tb.Window):
                 self.txt_info.insert("end", f"• {r}\n")
                 self.log_append(f"[ENGINE] {r}")
 
-        self.after(500, self._tick_ui_refresh)
+        self.after(1500, self._tick_ui_refresh)
 
     def _refresh_market_table(self, pairs: List[Dict[str, Any]], candidates: List[Dict[str, Any]]):
         cand_syms = {c.get("symbol") for c in candidates}
         # map current symbols to item ids so we can update or remove rows
         existing_rows = {
-            self.tree.set(iid, "symbol").replace("★ ", ""): iid
+            self.tree.set(iid, "symbol"): iid
             for iid in self.tree.get_children()
         }
         # sort pairs by score desc so best appear on top
@@ -682,10 +693,8 @@ class App(tb.Window):
                     p["score"] = compute_score(features)
             except Exception:
                 pass
-
-            display_sym = f"★ {sym}" if sym in cand_syms else sym
             values = (
-                display_sym,
+                sym,
                 f"{p.get('score',0.0):.1f}",
                 f"{p.get('pct_change_window',0.0):+.2f}",
                 self._fmt_sats(p.get('price_last',0.0)),
@@ -704,16 +713,22 @@ class App(tb.Window):
                 sc = 0.0
 
             tag = 'scoreLow'
-            if sc >= 90:
+            if sc >= 95:
+                tag = 'score95'
+            elif sc >= 90:
                 tag = 'score90'
             elif sc >= 80:
                 tag = 'score80'
-            elif sc >= 65:
-                tag = 'score65'
+            elif sc >= 70:
+                tag = 'score70'
             elif sc >= 60:
-                tag = 'score64'
+                tag = 'score60'
             elif sc >= 50:
-                tag = 'score59'
+                tag = 'score50'
+            elif sc >= 40:
+                tag = 'score40'
+            elif sc >= 30:
+                tag = 'score30'
 
             tags = [tag]
             if sym in cand_syms:

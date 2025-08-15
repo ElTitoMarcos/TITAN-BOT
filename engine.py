@@ -35,7 +35,6 @@ class Engine(threading.Thread):
         self._last_reasons: List[str] = []
         self._first_call_done: bool = False
         self._last_auto_ts: float = 0.0
-        self._greet_sent: bool = False
 
         os.makedirs(self.cfg.log_dir, exist_ok=True)
         self._audit_file = os.path.join(self.cfg.log_dir, "audit.csv")
@@ -443,21 +442,14 @@ def _log_audit(self, event: str, sym: str, detail: str):
                         self._last_auto_ts = now_ms
 
                 actions: List[Dict[str, Any]] = []
+                greet_msg = ""
                 if do_call:
                     try:
                         greet_msg = self.llm.greet("hola")
                         if greet_msg:
                             self.ui_log(f"[LLM] {greet_msg}")
                     except Exception:
-                        pass
-
-                    if self._greet_sent:
-                        llm_out = self.llm.propose_actions({
-                            **snapshot,
-                            "config": {**snapshot["config"], "max_actions_per_cycle": self.cfg.llm_max_actions_per_cycle},
-                        })
-                        actions = llm_out.get("actions", [])
-                    self._greet_sent = True
+                        greet_msg = ""
 
                     llm_out = self.llm.propose_actions({
                         **snapshot,
@@ -473,6 +465,9 @@ def _log_audit(self, event: str, sym: str, detail: str):
                     self._last_reasons = self._compute_reasons(actions, snapshot, candidates, open_count)
                     for r in self._last_reasons:
                         self.ui_log(f"[ENGINE {self.name}] {r}")
+
+                if greet_msg:
+                    self._last_reasons.append(f"LLM: {greet_msg}")
 
                 # Empuja estado nuevo
                 self.ui_push_snapshot(self.build_snapshot())
