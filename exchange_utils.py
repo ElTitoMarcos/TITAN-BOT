@@ -277,6 +277,10 @@ class BinanceExchange:
 
         Se añade un margen de 0.1 USDT para asegurar que las órdenes
         cumplen con el mínimo requerido por Binance."""
+
+        default = 5.0
+        buffer = 0.1
+
         # 1) Intentar obtener el mínimo global desde la información del exchange
         try:
             info = self.exchange.public_get_exchangeinfo()
@@ -284,12 +288,16 @@ class BinanceExchange:
                 if f.get("filterType") in ("MIN_NOTIONAL", "NOTIONAL"):
                     v = float(f.get("minNotional") or f.get("notional") or 0.0)
                     if v > 0:
-                        return float(v + 0.1)
+                        return float(v + buffer)
         except Exception:
             pass
 
         # 2) Fallback: recorrer los mercados spot con quote estable
-        self.load_markets()
+        try:
+            self.load_markets()
+        except Exception:
+            return float(default + buffer)
+
         min_usd = None
         for m in self.exchange.markets.values():
             try:
@@ -315,4 +323,5 @@ class BinanceExchange:
                 min_usd = val if (min_usd is None or val < min_usd) else min_usd
             except Exception:
                 continue
-        return float((min_usd if min_usd is not None else 5.0) + 0.1)
+
+        return float((min_usd if min_usd is not None else default) + buffer)
