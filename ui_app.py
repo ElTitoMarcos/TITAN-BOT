@@ -368,6 +368,9 @@ class App(tb.Window):
         if bool(self.var_use_min_live.get()):
             try:
                 min_usd = self.exchange.global_min_notional_usd()
+<<<<<< codex/fix-binance-minimum-order-and-api-calls-clp4xi
+                usd = float(min_usd) + 0.01
+=======
 <<<<<< codex/fix-binance-minimum-order-and-api-calls-zz7f3g
                 usd = float(min_usd) + 0.01
 =======
@@ -378,6 +381,7 @@ class App(tb.Window):
                 usd = float(min_usd) + 0.01
 =======
                 usd = float(min_usd) + 0.1
+>>>>>> main
 >>>>>> main
 >>>>>> main
 >>>>>> main
@@ -484,6 +488,9 @@ class App(tb.Window):
             try:
                 self._ensure_exchange()
                 min_usd = self.exchange.global_min_notional_usd()
+<<<<<< codex/fix-binance-minimum-order-and-api-calls-clp4xi
+                usd = float(min_usd) + 0.01
+=======
 <<<<<< codex/fix-binance-minimum-order-and-api-calls-zz7f3g
                 usd = float(min_usd) + 0.01
 =======
@@ -494,6 +501,7 @@ class App(tb.Window):
                 usd = float(min_usd) + 0.01
 =======
                 usd = float(min_usd) + 0.1
+>>>>>> main
 >>>>>> main
 >>>>>> main
 >>>>>> main

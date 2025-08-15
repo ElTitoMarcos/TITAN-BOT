@@ -296,6 +296,10 @@ class BinanceExchange:
         convierte a USD para obtener el mínimo absoluto con el que cumplir en
         cualquier mercado BTC.
 
+<<<<<< codex/fix-binance-minimum-order-and-api-calls-clp4xi
+        No se aplica margen adicional; el pequeño colchón (+0.01 USDT) se añade
+        al momento de enviar órdenes si así se configura desde la UI."""
+=======
 <<<<<< codex/fix-binance-minimum-order-and-api-calls-zz7f3g
         No se aplica margen adicional; el pequeño colchón (+0.1 USDT) se añade
         al momento de enviar órdenes si así se configura desde la UI."""
@@ -316,6 +320,7 @@ class BinanceExchange:
         cumplen con el mínimo requerido por Binance."""
         default = 5.0
         buffer = 0.01
+>>>>>> main
 >>>>>> main
 >>>>>> main
 >>>>>> main
