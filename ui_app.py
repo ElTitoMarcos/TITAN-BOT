@@ -343,11 +343,11 @@ class App(tb.Window):
         if bool(self.var_use_min_live.get()):
             try:
                 min_usd = self.exchange.global_min_notional_usd()
-                usd = float(min_usd)
+                usd = float(min_usd) + 0.1
                 self._engine_live.cfg.size_usd_live = float(usd if usd > 0 else self._engine_live.cfg.size_usd_live)
                 self.var_size_live.set(round(self._engine_live.cfg.size_usd_live, 2))
                 self.ent_size_live.configure(state="disabled")
-                self.lbl_min_marker.configure(text=f"Mínimo permitido por Binance: {usd:.2f} USDT")
+                self.lbl_min_marker.configure(text=f"Mínimo permitido por Binance: {min_usd:.2f} USDT")
             except Exception:
                 pass
         # LLM
@@ -446,12 +446,12 @@ class App(tb.Window):
             try:
                 self._ensure_exchange()
                 min_usd = self.exchange.global_min_notional_usd()
-                usd = float(min_usd)
+                usd = float(min_usd) + 0.1
                 self.var_size_live.set(round(usd, 2))
                 if self._engine_live:
                     self._engine_live.cfg.size_usd_live = float(usd)
                 self.ent_size_live.configure(state="disabled")
-                self.lbl_min_marker.configure(text=f"Mínimo permitido por Binance: {usd:.2f} USDT")
+                self.lbl_min_marker.configure(text=f"Mínimo permitido por Binance: {min_usd:.2f} USDT")
             except Exception as e:
                 self.log_append(f"[ENGINE] Error obteniendo mínimo: {e}")
         else:
