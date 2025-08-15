@@ -35,6 +35,9 @@ class Engine(threading.Thread):
         self._last_reasons: List[str] = []
         self._first_call_done: bool = False
         self._last_auto_ts: float = 0.0
+        self._greet_sent: bool = False
+        # Track highest price seen per symbol to detect 0.2% drops
+        self._max_price_seen: Dict[str, float] = {}
 
         os.makedirs(self.cfg.log_dir, exist_ok=True)
         self._audit_file = os.path.join(self.cfg.log_dir, "audit.csv")
@@ -126,8 +129,9 @@ class Engine(threading.Thread):
         cands: List[Dict[str, Any]] = []
         for p in snapshot.get("pairs", []):
             mid = float(p.get("mid") or p.get("price_last") or 0.0)
-            tick_pct = (1e-8 / mid * 100.0) if mid else 0.0
-            p["tick_pct_sat"] = tick_pct
+            tick = float(p.get("tick_size") or 1e-8)
+            tick_pct = (tick / mid * 100.0) if mid else 0.0
+            p["tick_pct"] = tick_pct
             if tick_pct > thr_pct:
                 cands.append(p)
         return cands
@@ -147,6 +151,14 @@ class Engine(threading.Thread):
             # fallback a valores directos si no hay store
             mid = ms.get('mid', p.get('mid', 0.0))
             p['mid'] = mid
+            # Update max seen price and compute drop from high
+            sym = p['symbol']
+            prev_high = self._max_price_seen.get(sym, mid)
+            if mid > prev_high:
+                self._max_price_seen[sym] = mid
+                prev_high = mid
+            drop_pct = ((prev_high - mid) / prev_high * 100.0) if prev_high else 0.0
+            p['drop_from_high_pct'] = drop_pct
             p['spread_pct'] = float(ms.get('spread_pct', 0.0))
             features = {
                 "imbalance": ms.get("imbalance", p.get("imbalance", 0.5)),
@@ -377,11 +389,11 @@ def _log_audit(self, event: str, sym: str, detail: str):
         while not self.is_stopped():
             try:
                 snapshot = self.build_snapshot()
+                self.ui_push_snapshot(snapshot)
                 self._try_fill_sim_orders(snapshot)
 
                 open_count = len(snapshot.get("open_orders", []))
-                # Determina los pares candidatos usando el snapshot actual
-                candidates = self._find_candidates(snapshot)
+                candidates = snapshot.get("candidates", []) or self._find_candidates(snapshot)
 
                 do_call = False
                 if not self._first_call_done and ((snapshot.get('pairs') and len(snapshot.get('pairs'))>0) or open_count):
@@ -395,22 +407,30 @@ def _log_audit(self, event: str, sym: str, detail: str):
                                 # Autotrade (sin LLM) si hay buenas condiciones
                 now_ms = time.time()*1000
                 if candidates and (now_ms - self._last_auto_ts) > 1500:
-                    top = candidates[0]
-                    sym = top.get('symbol')
-                    price = float(top.get('best_ask') or top.get('mid') or 0.0)
-                    if price > 0:
-                        usd = self.cfg.size_usd_sim if self.mode=="SIM" else self.cfg.size_usd_live
-                        # Coloca LIMIT BUY
-                        self.execute_actions([{"symbol": sym, "type": "PLACE_LIMIT_BUY", "price": price, "qty_usd": usd}], snapshot)
-                        self._last_auto_ts = now_ms
+                    drop_cand = next((c for c in candidates if c.get('drop_from_high_pct', 0.0) >= 0.2), None)
+                    if drop_cand:
+                        sym = drop_cand.get('symbol')
+                        price = float(drop_cand.get('best_ask') or drop_cand.get('mid') or 0.0)
+                        if price > 0:
+                            usd = self.cfg.size_usd_sim if self.mode=="SIM" else self.cfg.size_usd_live
+                            self.execute_actions([{"symbol": sym, "type": "PLACE_LIMIT_BUY", "price": price, "qty_usd": usd}], snapshot)
+                            self._last_auto_ts = now_ms
 
                 actions: List[Dict[str, Any]] = []
                 if do_call:
-                    llm_out = self.llm.propose_actions({
-                        **snapshot,
-                        "config": {**snapshot["config"], "max_actions_per_cycle": self.cfg.llm_max_actions_per_cycle},
-                    })
-                    actions = llm_out.get("actions", [])
+                    try:
+                        greet_msg = self.llm.greet("hola")
+                        if greet_msg:
+                            self.ui_log(f"[LLM] {greet_msg}")
+                    except Exception:
+                        pass
+                    if self._greet_sent:
+                        llm_out = self.llm.propose_actions({
+                            **snapshot,
+                            "config": {**snapshot["config"], "max_actions_per_cycle": self.cfg.llm_max_actions_per_cycle},
+                        })
+                        actions = llm_out.get("actions", [])
+                    self._greet_sent = True
 
                 valid = self.validate_actions(actions, snapshot)
                 if valid:

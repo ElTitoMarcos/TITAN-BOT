@@ -1,4 +1,4 @@
-import threading, queue, time
+import threading, queue, time, json, os
 import ttkbootstrap as tb
 from ttkbootstrap.constants import *
 from ttkbootstrap.scrolled import ScrolledText
@@ -66,7 +66,10 @@ class App(tb.Window):
         self._engine_live: Engine | None = None
         self.exchange = None
 
+        self._keys_file = os.path.join(os.path.dirname(__file__), ".api_keys.json")
+
         self._build_ui()
+        self._load_saved_keys()
         self._lock_controls(True)
         self.after(250, self._poll_log_queue)
         self.after(800, self._tick_ui_refresh)
@@ -265,6 +268,28 @@ class App(tb.Window):
             from exchange_utils import BinanceExchange
             self.exchange = BinanceExchange(rate_limit=True, sandbox=False)
 
+    def _load_saved_keys(self):
+        try:
+            with open(self._keys_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self.var_bin_key.set(data.get("bin_key", ""))
+            self.var_bin_sec.set(data.get("bin_sec", ""))
+            self.var_oai_key.set(data.get("oai_key", ""))
+        except Exception:
+            pass
+
+    def _save_api_keys(self):
+        try:
+            data = {
+                "bin_key": self.var_bin_key.get(),
+                "bin_sec": self.var_bin_sec.get(),
+                "oai_key": self.var_oai_key.get(),
+            }
+            with open(self._keys_file, "w", encoding="utf-8") as f:
+                json.dump(data, f)
+        except Exception:
+            pass
+
     # ------------------- Warmup -------------------
     def _warmup_load_market(self):
         try:
@@ -343,11 +368,11 @@ class App(tb.Window):
         if bool(self.var_use_min_live.get()):
             try:
                 min_usd = self.exchange.global_min_notional_usd()
-                usd = float(min_usd)
+                usd = float(min_usd) + 0.01
                 self._engine_live.cfg.size_usd_live = float(usd if usd > 0 else self._engine_live.cfg.size_usd_live)
                 self.var_size_live.set(round(self._engine_live.cfg.size_usd_live, 2))
                 self.ent_size_live.configure(state="disabled")
-                self.lbl_min_marker.configure(text=f"Mínimo permitido por Binance: {usd:.2f} USDT")
+                self.lbl_min_marker.configure(text=f"Mínimo permitido por Binance: {min_usd:.2f} USDT")
             except Exception:
                 pass
         # LLM
@@ -416,6 +441,7 @@ class App(tb.Window):
         ok_bin = self._apply_binance_keys()
         ok_oai = self._apply_openai_key()
         if ok_bin and ok_oai:
+            self._save_api_keys()
             self._lock_controls(False)
             self.log_append("[APP] APIs verificadas. Desbloqueando interfaz.")
         else:
@@ -446,12 +472,12 @@ class App(tb.Window):
             try:
                 self._ensure_exchange()
                 min_usd = self.exchange.global_min_notional_usd()
-                usd = float(min_usd)
+                usd = float(min_usd) + 0.01
                 self.var_size_live.set(round(usd, 2))
                 if self._engine_live:
                     self._engine_live.cfg.size_usd_live = float(usd)
                 self.ent_size_live.configure(state="disabled")
-                self.lbl_min_marker.configure(text=f"Mínimo permitido por Binance: {usd:.2f} USDT")
+                self.lbl_min_marker.configure(text=f"Mínimo permitido por Binance: {min_usd:.2f} USDT")
             except Exception as e:
                 self.log_append(f"[ENGINE] Error obteniendo mínimo: {e}")
         else:
@@ -504,7 +530,7 @@ class App(tb.Window):
         self.lbl_ws.configure(text=f"WS: {gs.get('latency_ws_ms',0):.0f} ms")
 
         # Tablas
-        self._refresh_market_table(snap.get("pairs", []))
+        self._refresh_market_table(snap.get("candidates") or snap.get("pairs", []))
         self._refresh_open_orders(snap.get("open_orders", []))
         self._refresh_closed_orders(snap.get("closed_orders", []))
 
