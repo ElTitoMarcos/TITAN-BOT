@@ -38,6 +38,7 @@ class Engine(threading.Thread):
         self._cand_cache: List[Dict[str, Any]] = []
         self._cand_cache_ts: float = 0.0
 
+
         os.makedirs(self.cfg.log_dir, exist_ok=True)
         self._audit_file = os.path.join(self.cfg.log_dir, "audit.csv")
         if not os.path.exists(self._audit_file):

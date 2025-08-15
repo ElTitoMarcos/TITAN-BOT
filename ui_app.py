@@ -6,6 +6,7 @@ from tkinter import ttk
 from typing import Dict, Any, List
 from config import UIColors, Defaults, AppState
 from engine import Engine
+from scoring import compute_score
 
 BADGE_SIM = "🔧SIM"
 BADGE_LIVE = "⚡LIVE"
@@ -109,6 +110,7 @@ class App(tb.Window):
         self._lock_controls(True)
         self.after(250, self._poll_log_queue)
         self.after(4000, self._tick_ui_refresh)
+
         # Precarga de mercado y balance
         self._warmup_thread = threading.Thread(target=self._warmup_load_market, daemon=True)
         self._warmup_thread.start()
@@ -192,6 +194,7 @@ class App(tb.Window):
         self.tree.configure(yscrollcommand=vsb.set)
         self.tree.grid(row=0, column=0, sticky="nsew"); vsb.grid(row=0, column=1, sticky="ns")
         ttk.Label(frm_mkt, text="Imb: >0.5 compras dominan, <0.5 ventas").grid(row=1, column=0, columnspan=2, sticky="w", pady=(4,0))
+
         # Colores por score (fino) en texto
         self.tree.tag_configure('score95', foreground='#166534')
         self.tree.tag_configure('score90', foreground='#15803d')
@@ -631,6 +634,7 @@ class App(tb.Window):
 
         now = time.time()
         if now - getattr(self, "_last_cand_refresh", 0) > 30:
+
             self._last_cand_refresh = now
             threading.Thread(target=self._refresh_market_candidates, daemon=True).start()
 
@@ -643,6 +647,7 @@ class App(tb.Window):
                 self.log_append(f"[ENGINE] {r}")
 
         self.after(4000, self._tick_ui_refresh)
+
 
     def _refresh_market_table(self, pairs: List[Dict[str, Any]], candidates: List[Dict[str, Any]]):
         cand_syms = {c.get("symbol") for c in candidates}
@@ -663,6 +668,7 @@ class App(tb.Window):
             quote_usd = self.exchange._quote_to_usd(quote) or 0.0
             buy_usd = topb_qty * best_bid * quote_usd
             sell_usd = topa_qty * best_ask * quote_usd
+
             values = (
                 sym,
                 f"{p.get('score',0.0):.1f}",
