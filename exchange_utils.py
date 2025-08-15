@@ -277,6 +277,7 @@ class BinanceExchange:
 
         Se añade un margen de 0.1 USDT para asegurar que las órdenes
         cumplen con el mínimo requerido por Binance."""
+<<<<<< codex/fix-minimum-allowed-amount-for-binance-v02fj6
 
         default = 5.0
         buffer = 0.1
@@ -299,6 +300,9 @@ class BinanceExchange:
             # Si la carga de mercados falla devolvemos el fallback seguro
             return float(default + buffer)
 
+=======
+        self.load_markets()
+>>>>>> main
         min_usd = None
         for m in self.exchange.markets.values():
             try:
@@ -324,5 +328,9 @@ class BinanceExchange:
                 min_usd = val if (min_usd is None or val < min_usd) else min_usd
             except Exception:
                 continue
+<<<<<< codex/fix-minimum-allowed-amount-for-binance-v02fj6
 
         return float((min_usd if min_usd is not None else default) + buffer)
+=======
+        return float((min_usd if min_usd is not None else 5.0) + 0.1)
+>>>>>> main
