@@ -191,7 +191,7 @@ class Engine(threading.Thread):
             "pairs": pairs,
             "config": {"fee_per_side": self.cfg.fee_per_side},
         })
-
+        
         self.ui_log(f"[ENGINE {self.name}] Evaluados {len(pairs)} pares; {len(candidates)} candidatos")
         snap = {
             "ts": int(time.time()*1000),

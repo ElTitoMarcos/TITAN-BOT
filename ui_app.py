@@ -638,20 +638,6 @@ class App(tb.Window):
         self.after(500, self._tick_ui_refresh)
 
     def _refresh_market_table(self, pairs: List[Dict[str, Any]], candidates: List[Dict[str, Any]]):
-            try:
-                sc = float(p.get('score',0.0))
-                tag = 'scoreLow'
-                if sc >= 90: tag = 'score90'
-                elif sc >= 80: tag = 'score80'
-                elif sc >= 65: tag = 'score65'
-                elif sc >= 60: tag = 'score64'
-                elif sc >= 50: tag = 'score59'
-                tags = [tag]
-                if sym in cand_syms:
-                    tags.append('candidate')
-                self.tree.item(item, tags=tuple(tags))
-            except Exception:
-                pass
         for iid in existing.values():
             self.tree.delete(iid)
         if self._sort_col:
