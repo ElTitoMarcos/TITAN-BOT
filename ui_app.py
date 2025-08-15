@@ -148,6 +148,7 @@ class App(tb.Window):
         self.tree.tag_configure('score50', background='#fbbf24')
         self.tree.tag_configure('scoreLow', background='#9ca3af')
         self.tree.tag_configure('veto', background='#ef4444', foreground='white')
+        self.tree.tag_configure('candidate', font=('Consolas', 10, 'bold'))
 
         # Órdenes abiertas
         frm_open = ttk.Labelframe(left, text="Órdenes abiertas", padding=6)
@@ -298,7 +299,7 @@ class App(tb.Window):
             if uni:
                 pairs = self.exchange.fetch_top_metrics(uni[: min(20, len(uni))])
                 if not self._snapshot:
-                    self._refresh_market_table(pairs)
+                    self._refresh_market_table(pairs, [])
             # Mínimo global BTC en el marcador
             try:
                 min_usd = self.exchange.global_min_notional_usd()
@@ -307,6 +308,33 @@ class App(tb.Window):
                 pass
         except Exception as e:
             self.log_append(f"[ENGINE] Warmup error: {e}")
+
+    def _refresh_market_candidates(self):
+        try:
+            self._ensure_exchange()
+            uni = self.exchange.fetch_universe("BTC")[:100]
+            if not uni:
+                return
+            pairs = self.exchange.fetch_top_metrics(uni[: min(20, len(uni))])
+            fee = float(self.cfg.fee_per_side)
+            thr_pct = fee * 2.0 * 100.0
+            cands: List[Dict[str, Any]] = []
+            self.log_append(f"[ENGINE] Buscando pares buenos (umbral {thr_pct:.4f}% basado en comisiones)")
+            for p in pairs:
+                sym = p.get("symbol", "")
+                mid = float(p.get("mid") or p.get("price_last") or 0.0)
+                tick = float(p.get("tick_size") or 1e-8)
+                tick_pct = (tick / mid * 100.0) if mid else 0.0
+                p["tick_pct"] = tick_pct
+                if tick_pct > thr_pct:
+                    p["is_candidate"] = True
+                    cands.append(p)
+                    self.log_append(f"[ENGINE] {sym} tick_pct {tick_pct:.4f}% > {thr_pct:.4f}% -> candidato")
+            self.log_append(f"[ENGINE] Candidatos encontrados: {len(cands)}")
+            self._snapshot = {**self._snapshot, "pairs": pairs, "candidates": cands}
+            self._refresh_market_table(pairs, cands)
+        except Exception as e:
+            self.log_append(f"[ENGINE] Error al refrescar mercado: {e}")
 
     # ------------------- Engine binding -------------------
     def _on_bot_sim(self, *_):
@@ -358,37 +386,37 @@ class App(tb.Window):
         self._engine_sim.cfg.llm_call_interval_ms = secs * 1000
         self._engine_sim.start()
 
-def _start_engine_live(self):
-    def push_snapshot(snap: Dict[str, Any]):
-        self._snapshot = snap
-    self._ensure_exchange()
-    self._engine_live = Engine(
-        ui_push_snapshot=push_snapshot,
-        ui_log=self.log_append,
-        exchange=self.exchange,
-        name="LIVE"
-    )
-    self._engine_live.mode = "LIVE"
-    # tamaño LIVE (mínimo global si toggle ON)
-    if bool(self.var_use_min_live.get()):
-        try:
-            min_usd = self.exchange.global_min_notional_usd()
-            usd = float(min_usd) + 0.1
-            self._engine_live.cfg.size_usd_live = float(
-                usd if usd > 0 else self._engine_live.cfg.size_usd_live
-            )
-            self.var_size_live.set(round(self._engine_live.cfg.size_usd_live, 2))
-            self.ent_size_live.configure(state="disabled")
-            self.lbl_min_marker.configure(text=f"Mínimo permitido por Binance: {min_usd:.2f} USDT")
-        except Exception:
-            pass
-    # LLM
-    self._engine_live.llm.set_model(self.var_llm_model.get())
-    secs = max(1, int(self.var_llm_secs.get()))
-    self._engine_live.cfg.llm_call_interval_ms = secs * 1000
-    # Confirm gate
-    self._engine_live.state.live_confirmed = bool(self.var_live_confirm.get())
-    self._engine_live.start()
+    def _start_engine_live(self):
+        def push_snapshot(snap: Dict[str, Any]):
+            self._snapshot = snap
+        self._ensure_exchange()
+        self._engine_live = Engine(
+            ui_push_snapshot=push_snapshot,
+            ui_log=self.log_append,
+            exchange=self.exchange,
+            name="LIVE"
+        )
+        self._engine_live.mode = "LIVE"
+        # tamaño LIVE (mínimo global si toggle ON)
+        if bool(self.var_use_min_live.get()):
+            try:
+                min_usd = self.exchange.global_min_notional_usd()
+                usd = float(min_usd) + 0.1
+                self._engine_live.cfg.size_usd_live = float(
+                    usd if usd > 0 else self._engine_live.cfg.size_usd_live
+                )
+                self.var_size_live.set(round(self._engine_live.cfg.size_usd_live, 2))
+                self.ent_size_live.configure(state="disabled")
+                self.lbl_min_marker.configure(text=f"Mínimo permitido por Binance: {min_usd:.2f} USDT")
+            except Exception:
+                pass
+        # LLM
+        self._engine_live.llm.set_model(self.var_llm_model.get())
+        secs = max(1, int(self.var_llm_secs.get()))
+        self._engine_live.cfg.llm_call_interval_ms = secs * 1000
+        # Confirm gate
+        self._engine_live.state.live_confirmed = bool(self.var_live_confirm.get())
+        self._engine_live.start()
 
 
     # ------------------- Actions -------------------
@@ -452,6 +480,7 @@ def _start_engine_live(self):
             self._save_api_keys()
             self._lock_controls(False)
             self.log_append("[APP] APIs verificadas. Desbloqueando interfaz.")
+            self._refresh_market_candidates()
         else:
             self.log_append("[APP] Error verificando APIs. Revísalas e intenta nuevamente.")
 
@@ -480,16 +509,7 @@ def _start_engine_live(self):
             try:
                 self._ensure_exchange()
                 min_usd = self.exchange.global_min_notional_usd()
-                usd = float(min_usd) + 0.01
-
-                usd = float(min_usd) + 0.01
-
                 usd = float(min_usd) + 0.1
-
-                usd = float(min_usd) + 0.01
-
-                usd = float(min_usd) + 0.1
-
                 self.var_size_live.set(round(usd, 2))
                 if self._engine_live:
                     self._engine_live.cfg.size_usd_live = float(usd)
@@ -547,7 +567,10 @@ def _start_engine_live(self):
         self.lbl_ws.configure(text=f"WS: {gs.get('latency_ws_ms',0):.0f} ms")
 
         # Tablas
-        self._refresh_market_table(snap.get("candidates") or snap.get("pairs", []))
+        self._refresh_market_table(
+            snap.get("pairs", []),
+            snap.get("candidates", []),
+        )
         self._refresh_open_orders(snap.get("open_orders", []))
         self._refresh_closed_orders(snap.get("closed_orders", []))
 
@@ -561,17 +584,24 @@ def _start_engine_live(self):
 
         self.after(1000, self._tick_ui_refresh)
 
-    def _refresh_market_table(self, pairs: List[Dict[str, Any]]):
+    def _refresh_market_table(self, pairs: List[Dict[str, Any]], candidates: List[Dict[str, Any]]):
         for i in self.tree.get_children():
             self.tree.delete(i)
+        cand_syms = {c.get("symbol") for c in candidates}
         for p in pairs:
-            item = self.tree.insert("", "end", values=(
-                p.get("symbol",""),
-                f"{p.get('score',0.0):.1f}",
-                f"{p.get('pct_change_window',0.0):+.2f}",
-                f"{(p.get('price_last',0.0)*1e8):.0f}",
-                f"{(p.get('depth',{}).get('buy',0.0)+p.get('depth',{}).get('sell',0.0))/1000:.1f}",
-            ))
+            sym = p.get("symbol", "")
+            display_sym = f"★ {sym}" if sym in cand_syms else sym
+            item = self.tree.insert(
+                "",
+                "end",
+                values=(
+                    display_sym,
+                    f"{p.get('score',0.0):.1f}",
+                    f"{p.get('pct_change_window',0.0):+.2f}",
+                    f"{(p.get('price_last',0.0)*1e8):.0f}",
+                    f"{(p.get('depth',{}).get('buy',0.0)+p.get('depth',{}).get('sell',0.0))/1000:.1f}",
+                ),
+            )
             try:
                 sc = float(p.get('score',0.0))
                 tag = 'scoreLow'
@@ -580,7 +610,10 @@ def _start_engine_live(self):
                 elif sc >= 65: tag = 'score65'
                 elif sc >= 60: tag = 'score64'
                 elif sc >= 50: tag = 'score59'
-                self.tree.item(item, tags=(tag,))
+                tags = [tag]
+                if sym in cand_syms:
+                    tags.append('candidate')
+                self.tree.item(item, tags=tuple(tags))
             except Exception:
                 pass
 
