@@ -480,23 +480,16 @@ def _start_engine_live(self):
             try:
                 self._ensure_exchange()
                 min_usd = self.exchange.global_min_notional_usd()
-<<<<<< codex/fix-binance-minimum-order-and-api-calls-clp4xi
                 usd = float(min_usd) + 0.01
-=======
-<<<<<< codex/fix-binance-minimum-order-and-api-calls-zz7f3g
+
                 usd = float(min_usd) + 0.01
-=======
-<<<<<< codex/fix-binance-minimum-order-and-api-calls-9nb9vg
+
                 usd = float(min_usd) + 0.1
-=======
-<<<<<< codex/fix-binance-minimum-order-and-api-calls-63gexs
+
                 usd = float(min_usd) + 0.01
-=======
+
                 usd = float(min_usd) + 0.1
->>>>>> main
->>>>>> main
->>>>>> main
->>>>>> main
+
                 self.var_size_live.set(round(usd, 2))
                 if self._engine_live:
                     self._engine_live.cfg.size_usd_live = float(usd)
