@@ -142,7 +142,6 @@ class Engine(threading.Thread):
         cands: List[Dict[str, Any]] = []
         self.ui_log(f"[ENGINE {self.name}] Buscando pares buenos (umbral {thr_pct:.4f}% basado en comisiones)")
         for p in snapshot.get("pairs", []):
-            sym = p.get("symbol", "")
             mid = float(p.get("mid") or p.get("price_last") or 0.0)
             tick = float(p.get("tick_size") or 1e-8)
             tick_pct = (tick / mid * 100.0) if mid else 0.0
@@ -150,9 +149,6 @@ class Engine(threading.Thread):
             if tick_pct > thr_pct:
                 p["is_candidate"] = True
                 cands.append(p)
-                self.ui_log(
-                    f"[ENGINE {self.name}] {sym} tick_pct {tick_pct:.4f}% > {thr_pct:.4f}% -> candidato"
-                )
         self.ui_log(f"[ENGINE {self.name}] Candidatos encontrados: {len(cands)}")
         return cands
 
@@ -401,6 +397,13 @@ def _log_audit(self, event: str, sym: str, detail: str):
         return False
 
     def run(self):
+        try:
+            greet_msg = self.llm.greet("hola")
+            if greet_msg:
+                self.ui_log(f"[LLM] {greet_msg}")
+                self._last_reasons = [f"LLM: {greet_msg}"]
+        except Exception:
+            pass
         while not self.is_stopped():
             try:
                 snapshot = self.build_snapshot()

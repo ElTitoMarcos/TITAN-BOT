@@ -109,7 +109,9 @@ class App(tb.Window):
         self._load_saved_keys()
         self._lock_controls(True)
         self.after(250, self._poll_log_queue)
-        self.after(1500, self._tick_ui_refresh)
+
+        self.after(5000, self._tick_ui_refresh)
+
         # Precarga de mercado y balance
         self._warmup_thread = threading.Thread(target=self._warmup_load_market, daemon=True)
         self._warmup_thread.start()
@@ -182,8 +184,9 @@ class App(tb.Window):
             ("score", "Score", 70, "e"),
             ("pct", "%24h", 70, "e"),
             ("price_sats", "Precio (sats)", 120, "e"),
-            ("buy_qty", "Buy Qty", 90, "e"),
-            ("sell_qty", "Sell Qty", 90, "e"),
+            ("buy_qty", "Buy $", 90, "e"),
+            ("sell_qty", "Sell $", 90, "e"),
+
             ("imb", "Imb", 70, "e"),
         ]
         for c, txt, w, an in headers:
@@ -192,6 +195,8 @@ class App(tb.Window):
         vsb = ttk.Scrollbar(frm_mkt, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=vsb.set)
         self.tree.grid(row=0, column=0, sticky="nsew"); vsb.grid(row=0, column=1, sticky="ns")
+        ttk.Label(frm_mkt, text="Imb: >0.5 compras dominan, <0.5 ventas").grid(row=1, column=0, columnspan=2, sticky="w", pady=(4,0))
+
         # Colores por score (fino) en texto
         self.tree.tag_configure('score95', foreground='#166534')
         self.tree.tag_configure('score90', foreground='#15803d')
@@ -379,7 +384,6 @@ class App(tb.Window):
             cands: List[Dict[str, Any]] = []
             self.log_append(f"[ENGINE] Buscando pares buenos (umbral {thr_pct:.4f}% basado en comisiones)")
             for p in pairs:
-                sym = p.get("symbol", "")
                 mid = float(p.get("mid") or p.get("price_last") or 0.0)
                 tick = float(p.get("tick_size") or 1e-8)
                 tick_pct = (tick / mid * 100.0) if mid else 0.0
@@ -387,7 +391,6 @@ class App(tb.Window):
                 if tick_pct > thr_pct:
                     p["is_candidate"] = True
                     cands.append(p)
-                    self.log_append(f"[ENGINE] {sym} tick_pct {tick_pct:.4f}% > {thr_pct:.4f}% -> candidato")
             self.log_append(f"[ENGINE] Candidatos encontrados: {len(cands)}")
             self._snapshot = {**self._snapshot, "pairs": pairs, "candidates": cands}
             self._refresh_market_table(pairs, cands)
@@ -645,7 +648,8 @@ class App(tb.Window):
                 self.txt_info.insert("end", f"• {r}\n")
                 self.log_append(f"[ENGINE] {r}")
 
-        self.after(1500, self._tick_ui_refresh)
+        self.after(5000, self._tick_ui_refresh)
+
 
     def _refresh_market_table(self, pairs: List[Dict[str, Any]], candidates: List[Dict[str, Any]]):
         cand_syms = {c.get("symbol") for c in candidates}
@@ -656,50 +660,24 @@ class App(tb.Window):
         }
         # sort pairs by score desc so best appear on top
         pairs_sorted = sorted(pairs, key=lambda p: p.get("score", 0.0), reverse=True)
+        btc_usd = self.exchange._quote_to_usd("BTC") or 0.0
         for p in pairs_sorted:
             sym = p.get("symbol", "")
-            # fetch order book to obtain quantities and imbalance if missing
-            try:
-                ob = self.exchange.exchange.fetch_order_book(sym, limit=5)
-                bids = ob.get("bids", [])
-                asks = ob.get("asks", [])
-                topb_qty = float(bids[0][1]) if bids else 0.0
-                topa_qty = float(asks[0][1]) if asks else 0.0
-                volb = sum(float(b[1]) for b in bids)
-                vola = sum(float(a[1]) for a in asks)
-                imb = volb / (volb + vola) if (volb + vola) > 0 else 0.5
-                p["bid_top_qty"] = topb_qty
-                p["ask_top_qty"] = topa_qty
-                p["imbalance"] = imb
-                p["depth_buy"] = volb
-                p["depth_sell"] = vola
-                p["best_bid"] = float(bids[0][0]) if bids else 0.0
-                p["best_ask"] = float(asks[0][0]) if asks else 0.0
-                p["spread_abs"] = p["best_ask"] - p["best_bid"] if bids and asks else p.get("spread_abs", 0.0)
-                if float(p.get("score", 0.0)) == 0.0:
-                    mid = (p["best_bid"] + p["best_ask"]) / 2.0 if bids and asks else p.get("mid", 0.0)
-                    features = {
-                        "pct_change_window": p.get("pct_change_window", 0.0),
-                        "depth_buy": volb,
-                        "depth_sell": vola,
-                        "best_bid_qty": topb_qty,
-                        "best_ask_qty": topa_qty,
-                        "spread_abs": p["spread_abs"],
-                        "mid": mid,
-                        "trade_flow_buy_ratio": 0.5,
-                        "micro_volatility": p.get("micro_volatility", 0.0),
-                        "weights": self.cfg.weights,
-                    }
-                    p["score"] = compute_score(features)
-            except Exception:
-                pass
+            topb_qty = float(p.get("bid_top_qty", 0.0) or 0.0)
+            topa_qty = float(p.get("ask_top_qty", 0.0) or 0.0)
+            best_bid = float(p.get("best_bid", 0.0) or 0.0)
+            best_ask = float(p.get("best_ask", 0.0) or 0.0)
+            buy_usd = topb_qty * best_bid * btc_usd
+            sell_usd = topa_qty * best_ask * btc_usd
+
             values = (
                 sym,
                 f"{p.get('score',0.0):.1f}",
                 f"{p.get('pct_change_window',0.0):+.2f}",
                 self._fmt_sats(p.get('price_last',0.0)),
-                f"{p.get('bid_top_qty',0.0):.2f}",
-                f"{p.get('ask_top_qty',0.0):.2f}",
+                f"{buy_usd:.2f}",
+                f"{sell_usd:.2f}",
+
                 f"{p.get('imbalance',0.5):.2f}",
             )
             item = existing_rows.pop(sym, None)
