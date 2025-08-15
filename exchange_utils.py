@@ -123,7 +123,6 @@ class BinanceExchange:
     _cached_universe: Dict[str, List[str]] = {}
     _fee_cache: Dict[str, float] = {}
 
-
     def __init__(self, rate_limit=True, sandbox=False):
         self.exchange = ccxt.binance({
             "enableRateLimit": rate_limit,

@@ -35,9 +35,6 @@ class Engine(threading.Thread):
         self._last_reasons: List[str] = []
         self._first_call_done: bool = False
         self._last_auto_ts: float = 0.0
-        self._cand_cache: List[Dict[str, Any]] = []
-        self._cand_cache_ts: float = 0.0
-
 
         os.makedirs(self.cfg.log_dir, exist_ok=True)
         self._audit_file = os.path.join(self.cfg.log_dir, "audit.csv")
@@ -138,26 +135,18 @@ class Engine(threading.Thread):
 
     # --------------------- Núcleo ---------------------
     def _find_candidates(self, snapshot: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Selecciona pares cuyo movimiento de 1 satoshi supera el coste de comisiones
-        y registra en el log el proceso de búsqueda."""
-        self.ui_log(f"[ENGINE {self.name}] Buscando pares buenos (umbral dinámico por comisiones)")
+        """Marca todos los pares BTC como candidatos y registra el proceso."""
+        self.ui_log(f"[ENGINE {self.name}] Buscando pares BTC")
         cands: List[Dict[str, Any]] = []
         for p in snapshot.get("pairs", []):
-            mid = float(p.get("mid") or p.get("price_last") or 0.0)
-            tick = float(p.get("tick_size") or 1e-8)
-            tick_pct = (tick / mid * 100.0) if mid else 0.0
-            sym = p.get("symbol", "")
-            fee = self.exchange.fee_for(sym)
-            thr_pct = fee * 2.0 * 100.0
-            p["tick_pct"] = tick_pct
-            if tick_pct > thr_pct:
-                p["is_candidate"] = True
-                cands.append(p)
+            p["is_candidate"] = True
+            cands.append(p)
+
         self.ui_log(f"[ENGINE {self.name}] Candidatos encontrados: {len(cands)}")
         return cands
 
     def build_snapshot(self) -> Dict[str, Any]:
-        universe = self.exchange.fetch_universe("USDT") + self.exchange.fetch_universe("BTC")
+        universe = self.exchange.fetch_universe("BTC")
         universe = list(dict.fromkeys(universe))[:200]
         pairs = self.exchange.fetch_top_metrics(universe)
         try:
@@ -169,7 +158,6 @@ class Engine(threading.Thread):
         store = self.exchange.market_summary_for([pp['symbol'] for pp in pairs])
         for p in pairs:
             ms = store.get(p['symbol'], {})
-            # fallback a valores directos si no hay store
             mid = ms.get('mid', p.get('mid', 0.0))
             p['mid'] = mid
             p['spread_pct'] = float(ms.get('spread_pct', 0.0))
@@ -194,6 +182,12 @@ class Engine(threading.Thread):
                 "trend_m": tr.get("trend_m", 0.0),
                 "weights": self.cfg.weights,
             }
+            p['best_bid'] = ms.get('best_bid', p.get('best_bid', 0.0))
+            p['best_ask'] = ms.get('best_ask', p.get('best_ask', 0.0))
+            p['bid_top_qty'] = features['best_bid_qty']
+            p['ask_top_qty'] = features['best_ask_qty']
+            p['imbalance'] = features['imbalance']
+            p['depth'] = {"buy": features['depth_buy'], "sell": features['depth_sell']}
             p["score"] = compute_score(features)
 
         pairs.sort(key=lambda x: (-x.get("score", 0.0), -x.get("edge_est_bps", 0.0)))
@@ -210,18 +204,15 @@ class Engine(threading.Thread):
             self.state.balance_usd = max(self.state.balance_usd, 1000.0)
         self._sim_mark_to_market(pairs)
 
-        # ---- Selección de candidatos (cacheada a 30s) ----
-        now = time.monotonic()
-        if now - self._cand_cache_ts >= 30.0:
-            self._cand_cache = self._find_candidates({
-                "pairs": pairs,
-                "config": {"fee_per_side": self.cfg.fee_per_side},
-            })
-            self._cand_cache_ts = now
-            self.ui_log(
-                f"[ENGINE {self.name}] Evaluados {len(pairs)} pares; {len(self._cand_cache)} candidatos"
-            )
-        candidates = list(self._cand_cache)
+        # ---- Selección de candidatos ----
+        candidates = self._find_candidates({
+            "pairs": pairs,
+            "config": {"fee_per_side": self.cfg.fee_per_side},
+        })
+        self.ui_log(
+            f"[ENGINE {self.name}] Evaluados {len(pairs)} pares; {len(candidates)} candidatos"
+        )
+
         snap = {
             "ts": int(time.time()*1000),
             "global_state": {

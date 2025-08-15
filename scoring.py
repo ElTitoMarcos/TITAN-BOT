@@ -20,7 +20,6 @@ def compute_score(features: Dict) -> float:
     5. Profundidad agregada del libro.
     6. Penalización por spread amplio.
     7. Penalización por micro-volatilidad.
-
     La primera consideración tiene el mayor peso y la última el menor.
     """
     pct = abs(float(features.get("pct_change_window", 0.0)))
@@ -75,6 +74,5 @@ def compute_score(features: Dict) -> float:
         momentum * w.get("momentum", 0) +
         spread_penalty * w.get("spread", 0) +
         micro_vol_pen * w.get("microvol", 0)
-
     )
     return float(_clamp(score, 0.0, 100.0))
