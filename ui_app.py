@@ -188,7 +188,6 @@ class App(tb.Window):
             ("momentum", "Momentum", 90, "e"),
             ("spread", "Spread", 90, "e"),
             ("micro_vol", "MicroVol", 90, "e"),
-
         ]
         for c, txt, w, an in headers:
             self.tree.heading(c, text=txt, command=lambda col=c: self._sort_tree(col, False))
@@ -836,7 +835,6 @@ class App(tb.Window):
                 f"{p.get('momentum',0.0):.2f}",
                 f"{p.get('spread_abs',0.0):.8f}",
                 f"{p.get('micro_volatility',0.0):.4f}",
-
             )
             item = existing_rows.pop(sym, None)
             if item:

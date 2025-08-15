@@ -38,7 +38,6 @@ class Engine(threading.Thread):
         self._patch_history: List[tuple[Dict[str, Any], str]] = []
         self._last_patch_code: str = ""
 
-
         os.makedirs(self.cfg.log_dir, exist_ok=True)
         self._audit_file = os.path.join(self.cfg.log_dir, "audit.csv")
         if not os.path.exists(self._audit_file):
@@ -174,7 +173,7 @@ class Engine(threading.Thread):
         for p in snapshot.get("pairs", []):
             p["is_candidate"] = True
             cands.append(p)
-            
+
         self.ui_log(f"[ENGINE {self.name}] Candidatos encontrados: {len(cands)}")
         return cands
 

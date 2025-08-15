@@ -212,9 +212,11 @@ class BinanceExchange:
             ws = (ws_snap or {}).get(sym, {})
             bb = ws.get("best_bid", t.get("bid", last) if t else 0.0) or 0.0
             ba = ws.get("best_ask", t.get("ask", last) if t else 0.0) or 0.0
-            mid = ws.get("mid") or ((bb+ba)/2.0 if (bb and ba) else last)
+            mid = ws.get("mid") or ((bb + ba) / 2.0 if (bb and ba) else last)
             spread_abs = abs(ba - bb) if (bb and ba) else 0.0
-            volb = (ws.get("depth_buy", 0.0) or 0.0); vola = (ws.get("depth_sell", 0.0) or 0.0)
+            volb = ws.get("depth_buy", 0.0) or 0.0
+            vola = ws.get("depth_sell", 0.0) or 0.0
+
             topb = ws.get("bid_top_qty", 0.0)
             topa = ws.get("ask_top_qty", 0.0)
             if (topb == 0.0 or topa == 0.0) or (volb == 0.0 or vola == 0.0):
@@ -223,10 +225,12 @@ class BinanceExchange:
                     bids = ob.get("bids", [])
                     asks = ob.get("asks", [])
                     if bids:
-                        bb = float(bids[0][0]); topb = float(bids[0][1])
+                        bb = float(bids[0][0])
+                        topb = float(bids[0][1])
                         volb = sum(float(q) for _, q in bids[:5])
                     if asks:
-                        ba = float(asks[0][0]); topa = float(asks[0][1])
+                        ba = float(asks[0][0])
+                        topa = float(asks[0][1])
                         vola = sum(float(q) for _, q in asks[:5])
                     spread_abs = abs(ba - bb) if (bb and ba) else spread_abs
                 except Exception:
@@ -264,22 +268,27 @@ class BinanceExchange:
                             tick_size = ts
                             break
             tick_size = tick_size or 1e-8
-            out.append({
-                "symbol": sym,
-                "price_last": last or mid or 0.0,
-                "mid": mid or 0.0,
-                "best_bid": bb, "best_ask": ba,
-                "spread_abs": spread_abs,
-                "pct_change_window": float(t.get("percentage") or 0.0) if t else 0.0,
-                "depth": {"buy": volb, "sell": vola},
-                "imbalance": imb,
-                "bid_top_qty": topb, "ask_top_qty": topa,
-                "trade_flow": ws.get("trade_flow", {"buy_ratio":0.5,"streak":0}),
-                "micro_volatility": (spread_abs / (mid or 1.0)) if mid else 0.0,
-                "tick_size": tick_size,
-                "edge_est_bps": 0.0,
-                "score": 0.0,
-            })
+            out.append(
+                {
+                    "symbol": sym,
+                    "price_last": last or mid or 0.0,
+                    "mid": mid or 0.0,
+                    "best_bid": bb,
+                    "best_ask": ba,
+                    "spread_abs": spread_abs,
+                    "pct_change_window": float(t.get("percentage") or 0.0) if t else 0.0,
+                    "depth": {"buy": volb, "sell": vola},
+                    "imbalance": imb,
+                    "bid_top_qty": topb,
+                    "ask_top_qty": topa,
+                    "trade_flow": ws.get("trade_flow", {"buy_ratio": 0.5, "streak": 0}),
+                    "micro_volatility": (spread_abs / (mid or 1.0)) if mid else 0.0,
+                    "tick_size": tick_size,
+                    "edge_est_bps": 0.0,
+                    "score": 0.0,
+                }
+            )
+
         return out
 
     # ---------- Quotes -> USD ----------
