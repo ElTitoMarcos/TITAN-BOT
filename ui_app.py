@@ -6,6 +6,7 @@ from tkinter import ttk
 from typing import Dict, Any, List
 from config import UIColors, Defaults, AppState
 from engine import Engine
+from scoring import compute_score
 
 BADGE_SIM = "🔧SIM"
 BADGE_LIVE = "⚡LIVE"
@@ -63,7 +64,7 @@ class App(tb.Window):
         return str(sats)
 
     def _coerce(self, val: str, col: str):
-        v = str(val).replace("★ ", "")
+        v = str(val)
         if col == "symbol":
             return v
         if col == "price_sats":
@@ -102,17 +103,21 @@ class App(tb.Window):
         self._engine_live: Engine | None = None
         self.exchange = None
 
+        self.metric_defaults = dict(self.cfg.weights)
+        self.metric_vars: Dict[str, tb.BooleanVar] = {}
+
         self._keys_file = os.path.join(os.path.dirname(__file__), ".api_keys.json")
 
         self._build_ui()
         self._load_saved_keys()
         self._lock_controls(True)
         self.after(250, self._poll_log_queue)
-        self.after(500, self._tick_ui_refresh)
+        self.after(4000, self._tick_ui_refresh)
         # Precarga de mercado y balance
         self._warmup_thread = threading.Thread(target=self._warmup_load_market, daemon=True)
         self._warmup_thread.start()
         self.after(2000, self._tick_balance_refresh)
+        self._last_cand_refresh = 0.0
 
     # ------------------- UI -------------------
     def _build_ui(self):
@@ -167,9 +172,8 @@ class App(tb.Window):
             "score",
             "pct",
             "price_sats",
-            "spread_bps",
-            "buy_k",
-            "sell_k",
+            "buy_qty",
+            "sell_qty",
             "imb",
         )
         self.tree = ttk.Treeview(frm_mkt, columns=cols, show="headings")
@@ -181,25 +185,27 @@ class App(tb.Window):
             ("score", "Score", 70, "e"),
             ("pct", "%24h", 70, "e"),
             ("price_sats", "Precio (sats)", 120, "e"),
-            ("spread_bps", "Spread(bps)", 100, "e"),
-            ("buy_k", "Buy k", 80, "e"),
-            ("sell_k", "Sell k", 80, "e"),
+            ("buy_qty", "Buy Qty $", 100, "e"),
+            ("sell_qty", "Sell Qty $", 100, "e"),
             ("imb", "Imb", 70, "e"),
         ]
         for c, txt, w, an in headers:
             self.tree.heading(c, text=txt, command=lambda col=c: self._sort_tree(col, False))
-            self.tree.column(c, width=w, anchor=an, stretch=False)
+            self.tree.column(c, width=w, anchor=an, stretch=True)
         vsb = ttk.Scrollbar(frm_mkt, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=vsb.set)
         self.tree.grid(row=0, column=0, sticky="nsew"); vsb.grid(row=0, column=1, sticky="ns")
-        # Colores por score (fino)
-        self.tree.tag_configure('score90', background='#0e7a3b')
-        self.tree.tag_configure('score80', background='#16a34a')
-        self.tree.tag_configure('score65', background='#22c55e')
-        self.tree.tag_configure('score64', background='#ffd24d')
-        self.tree.tag_configure('score59', background='#f59e0b')
-        self.tree.tag_configure('score50', background='#fbbf24')
-        self.tree.tag_configure('scoreLow', background='#9ca3af')
+        ttk.Label(frm_mkt, text="Imb: >0.5 compras dominan, <0.5 ventas").grid(row=1, column=0, columnspan=2, sticky="w", pady=(4,0))
+        # Colores por score (fino) en texto
+        self.tree.tag_configure('score95', foreground='#166534')
+        self.tree.tag_configure('score90', foreground='#15803d')
+        self.tree.tag_configure('score80', foreground='#16a34a')
+        self.tree.tag_configure('score70', foreground='#22c55e')
+        self.tree.tag_configure('score60', foreground='#84cc16')
+        self.tree.tag_configure('score50', foreground='#eab308')
+        self.tree.tag_configure('score40', foreground='#f97316')
+        self.tree.tag_configure('score30', foreground='#f43f5e')
+        self.tree.tag_configure('scoreLow', foreground='#b91c1c')
         self.tree.tag_configure('veto', background='#ef4444', foreground='white')
         self.tree.tag_configure('candidate', font=('Consolas', 10, 'bold'))
 
@@ -216,7 +222,7 @@ class App(tb.Window):
                                ("price","Precio",120,"e"),
                                ("qty_usd","USD",100,"e"),
                                ("age","Edad(s)",80,"e")]:
-            self.tree_open.heading(c, text=txt); self.tree_open.column(c, width=w, anchor=an, stretch=False)
+            self.tree_open.heading(c, text=txt); self.tree_open.column(c, width=w, anchor=an, stretch=True)
         vsb2 = ttk.Scrollbar(frm_open, orient="vertical", command=self.tree_open.yview)
         self.tree_open.configure(yscrollcommand=vsb2.set)
         self.tree_open.grid(row=0, column=0, sticky="nsew"); vsb2.grid(row=0, column=1, sticky="ns")
@@ -233,7 +239,7 @@ class App(tb.Window):
                                ("mode","Modo",80,"w"),
                                ("price","Precio",120,"e"),
                                ("qty_usd","USD",100,"e")]:
-            self.tree_closed.heading(c, text=txt); self.tree_closed.column(c, width=w, anchor=an, stretch=False)
+            self.tree_closed.heading(c, text=txt); self.tree_closed.column(c, width=w, anchor=an, stretch=True)
         vsb3 = ttk.Scrollbar(frm_closed, orient="vertical", command=self.tree_closed.yview)
         self.tree_closed.configure(yscrollcommand=vsb3.set)
         self.tree_closed.grid(row=0, column=0, sticky="nsew"); vsb3.grid(row=0, column=1, sticky="ns")
@@ -242,6 +248,10 @@ class App(tb.Window):
         right = ttk.Frame(self, padding=(0, 0, 10, 10))
         right.grid(row=1, column=1, sticky="nsew")
         right.columnconfigure(0, weight=1)
+        right.rowconfigure(4, weight=0)
+        right.rowconfigure(5, weight=1)
+        right.rowconfigure(6, weight=0)
+        right.rowconfigure(7, weight=1)
 
         ttk.Label(right, text="Ajustes").grid(row=0, column=0, sticky="w", pady=(0,6))
 
@@ -288,33 +298,55 @@ class App(tb.Window):
         ttk.Entry(frm_llm, textvariable=self.var_llm_secs, width=14).grid(row=1, column=1, sticky="e")
         ttk.Button(frm_llm, text="Aplicar LLM", command=self._apply_llm).grid(row=0, column=2, rowspan=2, padx=6)
 
-        # Estado
-        st = ttk.Labelframe(right, text="Estado", padding=8)
-        st.grid(row=4, column=0, sticky="ew", pady=6)
-        self.lbl_ws = ttk.Label(st, text="WS: 0 ms")
-        self.lbl_rest = ttk.Label(st, text="REST: 0 ms")
-        self.lbl_ws.grid(row=0, column=0, sticky="w")
-        self.lbl_rest.grid(row=0, column=1, sticky="e")
+        # Consulta LLM
+        frm_llm_manual = ttk.Labelframe(right, text="Consulta LLM", padding=8)
+        frm_llm_manual.grid(row=4, column=0, sticky="nsew")
+        frm_llm_manual.columnconfigure(0, weight=1)
+        self.var_llm_query = tb.StringVar()
+        ttk.Entry(frm_llm_manual, textvariable=self.var_llm_query).grid(row=0, column=0, sticky="ew")
+        ttk.Button(frm_llm_manual, text="Enviar", command=self._send_llm_query).grid(row=0, column=1, padx=4)
+        frm_llm_manual.rowconfigure(1, weight=1)
+        self.txt_llm_resp = ScrolledText(frm_llm_manual, height=3, autohide=True, wrap="word")
+        self.txt_llm_resp.grid(row=1, column=0, columnspan=2, sticky="nsew")
 
-        # Info / razones
+        # Información / Razones
         frm_info = ttk.Labelframe(right, text="Información / Razones", padding=8)
-        frm_info.grid(row=5, column=0, sticky="nsew", pady=6)
+        frm_info.grid(row=5, column=0, sticky="nsew", pady=(6, 0))
         frm_info.rowconfigure(0, weight=1); frm_info.columnconfigure(0, weight=1)
-        self.txt_info = ScrolledText(frm_info, height=12, autohide=True, wrap="word")
+        self.txt_info = ScrolledText(frm_info, height=6, autohide=True, wrap="word")
         self.txt_info.grid(row=0, column=0, sticky="nsew")
 
-        # Footer log
-        footer = ttk.Labelframe(self, text="Log", padding=10)
-        footer.grid(row=2, column=0, columnspan=2, sticky="ew")
-        footer.columnconfigure(0, weight=1)
-        self.txt_log = ScrolledText(footer, height=6, autohide=True, wrap="none")
-        self.txt_log.grid(row=0, column=0, sticky="ew")
+        # Métricas de Score
+        frm_met = ttk.Labelframe(right, text="Métricas Score", padding=8)
+        frm_met.grid(row=6, column=0, sticky="ew", pady=6)
+        for idx, (key, label) in enumerate([
+            ("trend_w", "Trend semanal"),
+            ("trend_d", "Trend diaria"),
+            ("pressure", "Presión libro"),
+            ("flow", "Flujo órdenes"),
+            ("trend_h", "Trend horas"),
+            ("depth", "Profundidad"),
+            ("trend_m", "Trend minutos"),
+            ("momentum", "Momentum"),
+            ("spread", "Spread"),
+            ("microvol", "Microvol"),
+        ]):
+            var = tb.BooleanVar(value=self.cfg.weights.get(key, 0) > 0)
+            self.metric_vars[key] = var
+            ttk.Checkbutton(frm_met, text=label, variable=var, command=self._apply_metric_weights).grid(row=idx//2, column=idx%2, sticky="w")
+
+        # Log
+        frm_log = ttk.Labelframe(right, text="Log", padding=8)
+        frm_log.grid(row=7, column=0, sticky="nsew", pady=6)
+        frm_log.rowconfigure(0, weight=1); frm_log.columnconfigure(0, weight=1)
+        self.txt_log = ScrolledText(frm_log, height=6, autohide=True, wrap="none")
+        self.txt_log.grid(row=0, column=0, sticky="nsew")
 
         # Bindings
         self.var_bot_sim.trace_add("write", self._on_bot_sim)
         self.var_bot_live.trace_add("write", self._on_bot_live)
         self.var_live_confirm.trace_add("write", self._on_live_confirm)
-        self.tree.bind("<<TreeviewSelect>>", lambda e: self._update_min_marker())
+        self.tree.bind("<<TreeviewSelect>>", self._on_pair_select)
 
     # ------------------- Helpers -------------------
     def _ensure_exchange(self):
@@ -348,9 +380,41 @@ class App(tb.Window):
     def _warmup_load_market(self):
         try:
             self._ensure_exchange()
-            uni = self.exchange.fetch_universe("BTC")[:100]
+            uni = [u for u in self.exchange.fetch_universe("BTC") if u.endswith("/BTC")][:100]
             if uni:
                 pairs = self.exchange.fetch_top_metrics(uni[: min(20, len(uni))])
+                store = self.exchange.market_summary_for([p['symbol'] for p in pairs])
+                trends = self.exchange.fetch_trend_metrics([p['symbol'] for p in pairs])
+                for p in pairs:
+                    ms = store.get(p['symbol'], {})
+                    tr = trends.get(p['symbol'], {})
+                    features = {
+                        "imbalance": ms.get("imbalance", p.get("imbalance", 0.5)),
+                        "spread_abs": ms.get("spread_abs", abs(p.get("best_ask",0.0)-p.get("best_bid",0.0))),
+                        "pct_change_window": p.get("pct_change_window", 0.0),
+                        "depth_buy": ms.get("depth_buy", p.get("depth",{}).get("buy",0.0)),
+                        "depth_sell": ms.get("depth_sell", p.get("depth",{}).get("sell",0.0)),
+                        "best_bid_qty": ms.get("bid_top_qty", p.get("bid_top_qty",0.0)),
+                        "best_ask_qty": ms.get("ask_top_qty", p.get("ask_top_qty",0.0)),
+                        "trade_flow_buy_ratio": ms.get("trade_flow", {}).get("buy_ratio", p.get("trade_flow", {}).get("buy_ratio", 0.5)),
+                        "mid": ms.get("mid", p.get("mid",0.0)),
+                        "spread_bps": p.get("spread_bps", 0.0),
+                        "tick_price_bps": p.get("tick_price_bps", 8.0),
+                        "base_volume": p.get("depth", {}).get("buy", 0.0) + p.get("depth", {}).get("sell", 0.0),
+                        "micro_volatility": p.get("micro_volatility", 0.0),
+                        "trend_w": tr.get("trend_w", 0.0),
+                        "trend_d": tr.get("trend_d", 0.0),
+                        "trend_h": tr.get("trend_h", 0.0),
+                        "trend_m": tr.get("trend_m", 0.0),
+                        "weights": self.cfg.weights,
+                    }
+                    p['best_bid'] = ms.get('best_bid', p.get('best_bid',0.0))
+                    p['best_ask'] = ms.get('best_ask', p.get('best_ask',0.0))
+                    p['bid_top_qty'] = features['best_bid_qty']
+                    p['ask_top_qty'] = features['best_ask_qty']
+                    p['imbalance'] = features['imbalance']
+                    p['depth'] = {"buy": features['depth_buy'], "sell": features['depth_sell']}
+                    p['score'] = compute_score(features)
                 if not self._snapshot:
                     self._refresh_market_table(pairs, [])
             # Mínimo global BTC en el marcador
@@ -365,26 +429,50 @@ class App(tb.Window):
     def _refresh_market_candidates(self):
         try:
             self._ensure_exchange()
-            uni = self.exchange.fetch_universe("BTC")[:100]
+            uni = [u for u in self.exchange.fetch_universe("BTC") if u.endswith("/BTC")][:100]
             if not uni:
                 return
             pairs = self.exchange.fetch_top_metrics(uni[: min(20, len(uni))])
-            fee = float(self.cfg.fee_per_side)
-            thr_pct = fee * 2.0 * 100.0
+            store = self.exchange.market_summary_for([p['symbol'] for p in pairs])
+            trends = self.exchange.fetch_trend_metrics([p['symbol'] for p in pairs])
             cands: List[Dict[str, Any]] = []
-            self.log_append(f"[ENGINE] Buscando pares buenos (umbral {thr_pct:.4f}% basado en comisiones)")
+            self.log_append("[ENGINE] Buscando pares BTC")
             for p in pairs:
-                sym = p.get("symbol", "")
-                mid = float(p.get("mid") or p.get("price_last") or 0.0)
-                tick = float(p.get("tick_size") or 1e-8)
-                tick_pct = (tick / mid * 100.0) if mid else 0.0
-                p["tick_pct"] = tick_pct
-                if tick_pct > thr_pct:
-                    p["is_candidate"] = True
-                    cands.append(p)
-                    self.log_append(f"[ENGINE] {sym} tick_pct {tick_pct:.4f}% > {thr_pct:.4f}% -> candidato")
+                ms = store.get(p['symbol'], {})
+                tr = trends.get(p['symbol'], {})
+                features = {
+                    "imbalance": ms.get("imbalance", p.get("imbalance", 0.5)),
+                    "spread_abs": ms.get("spread_abs", abs(p.get("best_ask",0.0)-p.get("best_bid",0.0))),
+                    "pct_change_window": p.get("pct_change_window", 0.0),
+                    "depth_buy": ms.get("depth_buy", p.get("depth",{}).get("buy",0.0)),
+                    "depth_sell": ms.get("depth_sell", p.get("depth",{}).get("sell",0.0)),
+                    "best_bid_qty": ms.get("bid_top_qty", p.get("bid_top_qty",0.0)),
+                    "best_ask_qty": ms.get("ask_top_qty", p.get("ask_top_qty",0.0)),
+                    "trade_flow_buy_ratio": ms.get("trade_flow", {}).get("buy_ratio", p.get("trade_flow", {}).get("buy_ratio", 0.5)),
+                    "mid": ms.get("mid", p.get("mid",0.0)),
+                    "spread_bps": p.get("spread_bps", 0.0),
+                    "tick_price_bps": p.get("tick_price_bps", 8.0),
+                    "base_volume": p.get("depth", {}).get("buy", 0.0) + p.get("depth", {}).get("sell", 0.0),
+                    "micro_volatility": p.get("micro_volatility", 0.0),
+                    "trend_w": tr.get("trend_w", 0.0),
+                    "trend_d": tr.get("trend_d", 0.0),
+                    "trend_h": tr.get("trend_h", 0.0),
+                    "trend_m": tr.get("trend_m", 0.0),
+                    "weights": self.cfg.weights,
+                }
+                p['best_bid'] = ms.get('best_bid', p.get('best_bid',0.0))
+                p['best_ask'] = ms.get('best_ask', p.get('best_ask',0.0))
+                p['bid_top_qty'] = features['best_bid_qty']
+                p['ask_top_qty'] = features['best_ask_qty']
+                p['imbalance'] = features['imbalance']
+                p['depth'] = {"buy": features['depth_buy'], "sell": features['depth_sell']}
+                p['score'] = compute_score(features)
+                p['is_candidate'] = True
+                cands.append(p)
+            cands.sort(key=lambda x: x.get('score',0.0), reverse=True)
             self.log_append(f"[ENGINE] Candidatos encontrados: {len(cands)}")
-            self._snapshot = {**self._snapshot, "pairs": pairs, "candidates": cands}
+            if not ((self._engine_sim and self._engine_sim.is_alive()) or (self._engine_live and self._engine_live.is_alive())):
+                self._snapshot = {**self._snapshot, "pairs": pairs, "candidates": cands}
             self._refresh_market_table(pairs, cands)
         except Exception as e:
             self.log_append(f"[ENGINE] Error al refrescar mercado: {e}")
@@ -550,6 +638,39 @@ class App(tb.Window):
             self._engine_live._last_loop_ts = time.monotonic()
         self.log_append("[LLM] Configuración aplicada.")
 
+    def _apply_metric_weights(self):
+        for key, var in self.metric_vars.items():
+            self.cfg.weights[key] = self.metric_defaults.get(key, 0) if var.get() else 0
+        if self._engine_sim:
+            self._engine_sim.cfg.weights = dict(self.cfg.weights)
+        if self._engine_live:
+            self._engine_live.cfg.weights = dict(self.cfg.weights)
+        self._refresh_market_candidates()
+
+    def _send_llm_query(self):
+        q = self.var_llm_query.get().strip()
+        if not q:
+            return
+        def worker():
+            eng = self._engine_live or self._engine_sim
+            resp = ""
+            if eng and eng.llm:
+                resp = eng.llm.ask(q)
+            else:
+                try:
+                    from llm_client import LLMClient
+                    llm = LLMClient(model=self.var_llm_model.get(), api_key=self.var_oai_key.get())
+                    resp = llm.ask(q)
+                except Exception:
+                    resp = ""
+            def update():
+                self.txt_llm_resp.delete("1.0", "end")
+                self.txt_llm_resp.insert("end", resp or "[sin respuesta]")
+                lines = int(self.txt_llm_resp.index('end-1c').split('.')[0])
+                self.txt_llm_resp.configure(height=min(10, max(3, lines)))
+            self.after(0, update)
+        threading.Thread(target=worker, daemon=True).start()
+
     def _apply_sizes(self):
         # SIM: editable
         try:
@@ -615,17 +736,15 @@ class App(tb.Window):
         try:
             if pnlu >= 0: self.lbl_pnl.configure(bootstyle=SUCCESS)
             else: self.lbl_pnl.configure(bootstyle=DANGER)
-        except Exception: pass
-        self.lbl_rest.configure(text=f"REST: {gs.get('latency_rest_ms',0):.0f} ms")
-        self.lbl_ws.configure(text=f"WS: {gs.get('latency_ws_ms',0):.0f} ms")
+        except Exception:
+            pass
 
         # Tablas
         self._refresh_market_table(
             snap.get("pairs", []),
             snap.get("candidates", []),
         )
-        self._refresh_open_orders(snap.get("open_orders", []))
-        self._refresh_closed_orders(snap.get("closed_orders", []))
+        threading.Thread(target=self._refresh_market_candidates, daemon=True).start()
 
         # Razones
         reasons = snap.get("reasons", [])
@@ -635,26 +754,52 @@ class App(tb.Window):
                 self.txt_info.insert("end", f"• {r}\n")
                 self.log_append(f"[ENGINE] {r}")
 
-        self.after(500, self._tick_ui_refresh)
+        self.after(4000, self._tick_ui_refresh)
+
+    def _tick_open_orders(self):
+        snap = self._snapshot or {}
+        self._refresh_open_orders(snap.get("open_orders", []))
+        self.after(4000, self._tick_open_orders)
+
+    def _tick_closed_orders(self):
+        snap = self._snapshot or {}
+        self._refresh_closed_orders(snap.get("closed_orders", []))
+        self.after(4000, self._tick_closed_orders)
+
+    def _on_pair_select(self, _event):
+        sel = self.tree.selection()
+        if not sel:
+            return
+        self.after(300, lambda: [self.tree.selection_remove(i) for i in sel])
 
     def _refresh_market_table(self, pairs: List[Dict[str, Any]], candidates: List[Dict[str, Any]]):
         cand_syms = {c.get("symbol") for c in candidates}
+        # Solo pares con BTC
+        pairs = [p for p in pairs if str(p.get("symbol","" )).endswith("/BTC")]
         # map current symbols to item ids so we can update or remove rows
         existing_rows = {
-            self.tree.set(iid, "symbol").replace("★ ", ""): iid
+            self.tree.set(iid, "symbol"): iid
             for iid in self.tree.get_children()
         }
-        for p in pairs:
+        # sort pairs by score desc so best appear on top
+        pairs_sorted = sorted(pairs, key=lambda p: p.get("score", 0.0), reverse=True)
+        for p in pairs_sorted:
             sym = p.get("symbol", "")
-            display_sym = f"★ {sym}" if sym in cand_syms else sym
+            topb_qty = float(p.get("bid_top_qty", 0.0) or 0.0)
+            topa_qty = float(p.get("ask_top_qty", 0.0) or 0.0)
+            best_bid = float(p.get("best_bid", 0.0) or 0.0)
+            best_ask = float(p.get("best_ask", 0.0) or 0.0)
+            quote = sym.split("/")[1] if "/" in sym else ""
+            quote_usd = self.exchange._quote_to_usd(quote) or 0.0
+            buy_usd = topb_qty * best_bid * quote_usd
+            sell_usd = topa_qty * best_ask * quote_usd
             values = (
-                display_sym,
+                sym,
                 f"{p.get('score',0.0):.1f}",
                 f"{p.get('pct_change_window',0.0):+.2f}",
                 self._fmt_sats(p.get('price_last',0.0)),
-                f"{(p.get('spread_abs',0.0)/(p.get('mid',1.0) or 1.0))*1e4:.1f}",
-                f"{p.get('depth',{}).get('buy',0.0)/1000:.1f}",
-                f"{p.get('depth',{}).get('sell',0.0)/1000:.1f}",
+                f"{buy_usd:.2f}",
+                f"{sell_usd:.2f}",
                 f"{p.get('imbalance',0.5):.2f}",
             )
             item = existing_rows.pop(sym, None)
@@ -668,16 +813,22 @@ class App(tb.Window):
                 sc = 0.0
 
             tag = 'scoreLow'
-            if sc >= 90:
+            if sc >= 95:
+                tag = 'score95'
+            elif sc >= 90:
                 tag = 'score90'
             elif sc >= 80:
                 tag = 'score80'
-            elif sc >= 65:
-                tag = 'score65'
+            elif sc >= 70:
+                tag = 'score70'
             elif sc >= 60:
-                tag = 'score64'
+                tag = 'score60'
             elif sc >= 50:
-                tag = 'score59'
+                tag = 'score50'
+            elif sc >= 40:
+                tag = 'score40'
+            elif sc >= 30:
+                tag = 'score30'
 
             tags = [tag]
             if sym in cand_syms:
