@@ -273,7 +273,10 @@ class BinanceExchange:
         return float(usd) / (pbtc or 1.0)
 
     def global_min_notional_usd(self) -> float:
-        """Devuelve el mínimo notional (USDT) más bajo que exige Binance entre mercados spot activos con quote estable."""
+        """Devuelve el mínimo notional (USDT) más bajo que exige Binance entre mercados spot activos con quote estable.
+
+        Se añade un margen de 0.1 USDT para asegurar que las órdenes
+        cumplen con el mínimo requerido por Binance."""
         self.load_markets()
         min_usd = None
         for m in self.exchange.markets.values():
@@ -296,4 +299,4 @@ class BinanceExchange:
                 min_usd = val if (min_usd is None or val < min_usd) else min_usd
             except Exception:
                 continue
-        return float(min_usd if min_usd is not None else 5.0)
+        return float((min_usd if min_usd is not None else 5.0) + 0.1)
