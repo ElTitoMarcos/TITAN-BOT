@@ -121,18 +121,25 @@ class Engine(threading.Thread):
 
     # --------------------- Núcleo ---------------------
     def _find_candidates(self, snapshot: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Selecciona pares cuyo movimiento de 1 satoshi supera el coste de comisiones."""
+        """Selecciona pares cuyo movimiento de 1 satoshi supera el coste de comisiones
+        y registra en el log el proceso de búsqueda."""
         fee = float(snapshot.get("config", {}).get("fee_per_side", 0.0))
         thr_pct = fee * 2.0 * 100.0
         cands: List[Dict[str, Any]] = []
+        self.ui_log(f"[ENGINE {self.name}] Buscando pares buenos (umbral {thr_pct:.4f}% basado en comisiones)")
         for p in snapshot.get("pairs", []):
+            sym = p.get("symbol", "")
             mid = float(p.get("mid") or p.get("price_last") or 0.0)
             tick = float(p.get("tick_size") or 1e-8)
             tick_pct = (tick / mid * 100.0) if mid else 0.0
-
             p["tick_pct"] = tick_pct
             if tick_pct > thr_pct:
+                p["is_candidate"] = True
                 cands.append(p)
+                self.ui_log(
+                    f"[ENGINE {self.name}] {sym} tick_pct {tick_pct:.4f}% > {thr_pct:.4f}% -> candidato"
+                )
+        self.ui_log(f"[ENGINE {self.name}] Candidatos encontrados: {len(cands)}")
         return cands
 
     def build_snapshot(self) -> Dict[str, Any]:
@@ -186,6 +193,7 @@ class Engine(threading.Thread):
         })
         if not candidates:
             candidates = pairs[:5]
+        self.ui_log(f"[ENGINE {self.name}] Evaluados {len(pairs)} pares; {len(candidates)} candidatos")
         snap = {
             "ts": int(time.time()*1000),
             "global_state": {
