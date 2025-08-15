@@ -113,6 +113,7 @@ class App(tb.Window):
         self._lock_controls(True)
         self.after(250, self._poll_log_queue)
         self.after(4000, self._tick_ui_refresh)
+
         # Precarga de mercado y balance
         self._warmup_thread = threading.Thread(target=self._warmup_load_market, daemon=True)
         self._warmup_thread.start()
@@ -196,6 +197,7 @@ class App(tb.Window):
         self.tree.configure(yscrollcommand=vsb.set)
         self.tree.grid(row=0, column=0, sticky="nsew"); vsb.grid(row=0, column=1, sticky="ns")
         ttk.Label(frm_mkt, text="Imb: >0.5 compras dominan, <0.5 ventas").grid(row=1, column=0, columnspan=2, sticky="w", pady=(4,0))
+
         # Colores por score (fino) en texto
         self.tree.tag_configure('score95', foreground='#166534')
         self.tree.tag_configure('score90', foreground='#15803d')
@@ -327,6 +329,7 @@ class App(tb.Window):
         # Métricas de Score
         frm_met = ttk.Labelframe(right, text="Métricas Score", padding=8)
         frm_met.grid(row=7, column=0, sticky="ew", pady=6)
+
         for idx, (key, label) in enumerate([
             ("trend_w", "Trend semanal"),
             ("trend_d", "Trend diaria"),
@@ -388,7 +391,11 @@ class App(tb.Window):
     def _warmup_load_market(self):
         try:
             self._ensure_exchange()
-            uni = self.exchange.fetch_universe("BTC")[:100]
+            uni = list(dict.fromkeys(
+                self.exchange.fetch_universe("USDT") +
+                self.exchange.fetch_universe("BTC")
+            ))[:100]
+
             if uni:
                 pairs = self.exchange.fetch_top_metrics(uni[: min(20, len(uni))])
                 store = self.exchange.market_summary_for([p['symbol'] for p in pairs])
@@ -437,7 +444,11 @@ class App(tb.Window):
     def _refresh_market_candidates(self):
         try:
             self._ensure_exchange()
-            uni = self.exchange.fetch_universe("BTC")[:100]
+            uni = list(dict.fromkeys(
+                self.exchange.fetch_universe("USDT") +
+                self.exchange.fetch_universe("BTC")
+            ))[:100]
+
             if not uni:
                 return
             pairs = self.exchange.fetch_top_metrics(uni[: min(20, len(uni))])
@@ -478,6 +489,7 @@ class App(tb.Window):
                 p['is_candidate'] = True
                 cands.append(p)
             cands.sort(key=lambda x: x.get('score',0.0), reverse=True)
+
             self.log_append(f"[ENGINE] Candidatos encontrados: {len(cands)}")
             if not ((self._engine_sim and self._engine_sim.is_alive()) or (self._engine_live and self._engine_live.is_alive())):
                 self._snapshot = {**self._snapshot, "pairs": pairs, "candidates": cands}

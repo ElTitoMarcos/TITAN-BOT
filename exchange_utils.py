@@ -232,6 +232,8 @@ class BinanceExchange:
                 except Exception:
                     pass
             imb = (volb / (volb + vola)) if (volb + vola) > 0 else 0.5
+            topb = ws.get("bid_top_qty", 0.0)
+            topa = ws.get("ask_top_qty", 0.0)
 
             mkt = (self.exchange.markets or {}).get(sym, {})
             precision = (mkt.get("precision") or {}).get("price")
