@@ -109,8 +109,7 @@ class App(tb.Window):
         self._load_saved_keys()
         self._lock_controls(True)
         self.after(250, self._poll_log_queue)
-
-        self.after(5000, self._tick_ui_refresh)
+        self.after(4000, self._tick_ui_refresh)
 
         # Precarga de mercado y balance
         self._warmup_thread = threading.Thread(target=self._warmup_load_market, daemon=True)
@@ -184,9 +183,8 @@ class App(tb.Window):
             ("score", "Score", 70, "e"),
             ("pct", "%24h", 70, "e"),
             ("price_sats", "Precio (sats)", 120, "e"),
-            ("buy_qty", "Buy $", 90, "e"),
-            ("sell_qty", "Sell $", 90, "e"),
-
+            ("buy_qty", "Buy Qty $", 100, "e"),
+            ("sell_qty", "Sell Qty $", 100, "e"),
             ("imb", "Imb", 70, "e"),
         ]
         for c, txt, w, an in headers:
@@ -207,7 +205,6 @@ class App(tb.Window):
         self.tree.tag_configure('score40', foreground='#f97316')
         self.tree.tag_configure('score30', foreground='#f43f5e')
         self.tree.tag_configure('scoreLow', foreground='#b91c1c')
-
         self.tree.tag_configure('veto', background='#ef4444', foreground='white')
         self.tree.tag_configure('candidate', font=('Consolas', 10, 'bold'))
 
@@ -358,7 +355,7 @@ class App(tb.Window):
     def _warmup_load_market(self):
         try:
             self._ensure_exchange()
-            uni = self.exchange.fetch_universe("BTC")[:100]
+            uni = self.exchange.fetch_universe(self.cfg.universe_quote)[:100]
             if uni:
                 pairs = self.exchange.fetch_top_metrics(uni[: min(20, len(uni))])
                 if not self._snapshot:
@@ -375,7 +372,7 @@ class App(tb.Window):
     def _refresh_market_candidates(self):
         try:
             self._ensure_exchange()
-            uni = self.exchange.fetch_universe("BTC")[:100]
+            uni = self.exchange.fetch_universe(self.cfg.universe_quote)[:100]
             if not uni:
                 return
             pairs = self.exchange.fetch_top_metrics(uni[: min(20, len(uni))])
@@ -636,7 +633,8 @@ class App(tb.Window):
         self._refresh_closed_orders(snap.get("closed_orders", []))
 
         now = time.time()
-        if now - getattr(self, "_last_cand_refresh", 0) > 15:
+        if now - getattr(self, "_last_cand_refresh", 0) > 30:
+
             self._last_cand_refresh = now
             threading.Thread(target=self._refresh_market_candidates, daemon=True).start()
 
@@ -648,7 +646,7 @@ class App(tb.Window):
                 self.txt_info.insert("end", f"• {r}\n")
                 self.log_append(f"[ENGINE] {r}")
 
-        self.after(5000, self._tick_ui_refresh)
+        self.after(4000, self._tick_ui_refresh)
 
 
     def _refresh_market_table(self, pairs: List[Dict[str, Any]], candidates: List[Dict[str, Any]]):
@@ -660,15 +658,16 @@ class App(tb.Window):
         }
         # sort pairs by score desc so best appear on top
         pairs_sorted = sorted(pairs, key=lambda p: p.get("score", 0.0), reverse=True)
-        btc_usd = self.exchange._quote_to_usd("BTC") or 0.0
         for p in pairs_sorted:
             sym = p.get("symbol", "")
             topb_qty = float(p.get("bid_top_qty", 0.0) or 0.0)
             topa_qty = float(p.get("ask_top_qty", 0.0) or 0.0)
             best_bid = float(p.get("best_bid", 0.0) or 0.0)
             best_ask = float(p.get("best_ask", 0.0) or 0.0)
-            buy_usd = topb_qty * best_bid * btc_usd
-            sell_usd = topa_qty * best_ask * btc_usd
+            quote = sym.split("/")[1] if "/" in sym else ""
+            quote_usd = self.exchange._quote_to_usd(quote) or 0.0
+            buy_usd = topb_qty * best_bid * quote_usd
+            sell_usd = topa_qty * best_ask * quote_usd
 
             values = (
                 sym,
@@ -677,7 +676,6 @@ class App(tb.Window):
                 self._fmt_sats(p.get('price_last',0.0)),
                 f"{buy_usd:.2f}",
                 f"{sell_usd:.2f}",
-
                 f"{p.get('imbalance',0.5):.2f}",
             )
             item = existing_rows.pop(sym, None)

@@ -120,7 +120,7 @@ class BinanceWS:
         return max(0.0, (time.time()*1000.0) - (self.s.last_ms or 0.0))
 
 class BinanceExchange:
-    _cached_universe: List[str] = []
+    _cached_universe: Dict[str, List[str]] = {}
 
     def __init__(self, rate_limit=True, sandbox=False):
         self.exchange = ccxt.binance({
@@ -172,21 +172,26 @@ class BinanceExchange:
         return self.ws.snapshot_for(symbols)
 
     # ---------- Universe + metrics ----------
-    def fetch_universe(self, quote="BTC") -> List[str]:
-        if self._cached_universe:
-            return self._cached_universe
+    def fetch_universe(self, quote: Optional[str] = "BTC") -> List[str]:
+        key = (quote or "ALL").upper()
+        if key in self._cached_universe:
+            return self._cached_universe[key]
         self.load_markets()
-        syms = []
+        syms: List[str] = []
         for s, m in self.exchange.markets.items():
             try:
-                if not m.get("active"): continue
-                if m.get("spot") is False: continue
-                if (m.get("quote") or "").upper() != quote.upper(): continue
+                if not m.get("active"):
+                    continue
+                if m.get("spot") is False:
+                    continue
+                if quote and quote.upper() != "ALL":
+                    if (m.get("quote") or "").upper() != quote.upper():
+                        continue
                 syms.append(m.get("symbol") or s)
             except Exception:
                 continue
-        self._cached_universe = sorted(list(set(syms)))
-        return self._cached_universe
+        self._cached_universe[key] = sorted(list(set(syms)))
+        return self._cached_universe[key]
 
     def fetch_top_metrics(self, symbols: List[str], limit: int = 200) -> List[Dict[str, Any]]:
         out: List[Dict[str, Any]] = []

@@ -8,7 +8,7 @@ from llm_client import LLMClient
 class Engine(threading.Thread):
     """
     Motor principal con modos SIM/LIVE.
-    - Snapshot del universo */BTC con WS+REST
+    - Snapshot del universo completo con WS+REST
     - LLM (OpenAI si hay clave; heurística si no)
     - Validación dura y ejecución (SIM/LIVE)
     - Razones cuando no opera
@@ -35,6 +35,9 @@ class Engine(threading.Thread):
         self._last_reasons: List[str] = []
         self._first_call_done: bool = False
         self._last_auto_ts: float = 0.0
+        self._cand_cache: List[Dict[str, Any]] = []
+        self._cand_cache_ts: float = 0.0
+
 
         os.makedirs(self.cfg.log_dir, exist_ok=True)
         self._audit_file = os.path.join(self.cfg.log_dir, "audit.csv")
@@ -154,7 +157,7 @@ class Engine(threading.Thread):
 
     def build_snapshot(self) -> Dict[str, Any]:
         universe = self.exchange.fetch_universe(self.cfg.universe_quote)[:200]
-        pairs = self.exchange.fetch_top_metrics(universe[: self.cfg.topN])
+        pairs = self.exchange.fetch_top_metrics(universe)
         # Collector for selected symbols
         try:
             self.exchange.ensure_collector([p['symbol'] for p in pairs], interval_ms=800)
@@ -187,6 +190,7 @@ class Engine(threading.Thread):
             p["score"] = compute_score(features)
 
         pairs.sort(key=lambda x: (-x.get("score", 0.0), -x.get("edge_est_bps", 0.0)))
+        pairs = pairs[: self.cfg.topN]
 
         try:
             _b = self.exchange.fetch_balances_summary()
@@ -199,13 +203,18 @@ class Engine(threading.Thread):
             self.state.balance_usd = max(self.state.balance_usd, 1000.0)
         self._sim_mark_to_market(pairs)
 
-        # ---- Selección de candidatos (antes de construir snapshot) ----
-        candidates = self._find_candidates({
-            "pairs": pairs,
-            "config": {"fee_per_side": self.cfg.fee_per_side},
-        })
-        
-        self.ui_log(f"[ENGINE {self.name}] Evaluados {len(pairs)} pares; {len(candidates)} candidatos")
+        # ---- Selección de candidatos (cacheada a 30s) ----
+        now = time.monotonic()
+        if now - self._cand_cache_ts >= 30.0:
+            self._cand_cache = self._find_candidates({
+                "pairs": pairs,
+                "config": {"fee_per_side": self.cfg.fee_per_side},
+            })
+            self._cand_cache_ts = now
+            self.ui_log(
+                f"[ENGINE {self.name}] Evaluados {len(pairs)} pares; {len(self._cand_cache)} candidatos"
+            )
+        candidates = list(self._cand_cache)
         snap = {
             "ts": int(time.time()*1000),
             "global_state": {
