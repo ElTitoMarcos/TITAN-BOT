@@ -101,6 +101,8 @@ class BinanceWS:
                 ba = asks[0][0] if asks else 0.0
                 mid = (bb+ba)/2.0 if bb and ba else (bb or ba or 0.0)
                 volb = sum(q for _,q in bids[:5]); vola = sum(q for _,q in asks[:5])
+                top_bid_qty = bids[0][1] if bids else 0.0
+                top_ask_qty = asks[0][1] if asks else 0.0
                 spread = (ba-bb) if (bb and ba) else 0.0
                 imb = (volb/(volb+vola)) if (volb+vola)>0 else 0.5
                 tf_buy = float(flow.get("buy",0)); tf_sell = float(flow.get("sell",0))
@@ -109,6 +111,7 @@ class BinanceWS:
                     "best_bid": bb, "best_ask": ba, "mid": mid,
                     "spread_abs": spread, "spread_pct": (spread/mid*100.0) if mid else 0.0,
                     "depth_buy": volb, "depth_sell": vola, "imbalance": imb,
+                    "bid_top_qty": top_bid_qty, "ask_top_qty": top_ask_qty,
                     "trade_flow": {"buy_ratio": buy_ratio, "streak": int(flow.get("streak",0))},
                 }
         return out
@@ -117,7 +120,8 @@ class BinanceWS:
         return max(0.0, (time.time()*1000.0) - (self.s.last_ms or 0.0))
 
 class BinanceExchange:
-    _cached_universe: List[str] = []
+    _cached_universe: Dict[str, List[str]] = {}
+    _fee_cache: Dict[str, float] = {}
 
     def __init__(self, rate_limit=True, sandbox=False):
         self.exchange = ccxt.binance({
@@ -169,21 +173,26 @@ class BinanceExchange:
         return self.ws.snapshot_for(symbols)
 
     # ---------- Universe + metrics ----------
-    def fetch_universe(self, quote="BTC") -> List[str]:
-        if self._cached_universe:
-            return self._cached_universe
+    def fetch_universe(self, quote: Optional[str] = "BTC") -> List[str]:
+        key = (quote or "ALL").upper()
+        if key in self._cached_universe:
+            return self._cached_universe[key]
         self.load_markets()
-        syms = []
+        syms: List[str] = []
         for s, m in self.exchange.markets.items():
             try:
-                if not m.get("active"): continue
-                if m.get("spot") is False: continue
-                if (m.get("quote") or "").upper() != quote.upper(): continue
+                if not m.get("active"):
+                    continue
+                if m.get("spot") is False:
+                    continue
+                if quote and quote.upper() != "ALL":
+                    if (m.get("quote") or "").upper() != quote.upper():
+                        continue
                 syms.append(m.get("symbol") or s)
             except Exception:
                 continue
-        self._cached_universe = sorted(list(set(syms)))
-        return self._cached_universe
+        self._cached_universe[key] = sorted(list(set(syms)))
+        return self._cached_universe[key]
 
     def fetch_top_metrics(self, symbols: List[str], limit: int = 200) -> List[Dict[str, Any]]:
         out: List[Dict[str, Any]] = []
@@ -206,7 +215,23 @@ class BinanceExchange:
             mid = ws.get("mid") or ((bb+ba)/2.0 if (bb and ba) else last)
             spread_abs = abs(ba - bb) if (bb and ba) else 0.0
             volb = (ws.get("depth_buy", 0.0) or 0.0); vola = (ws.get("depth_sell", 0.0) or 0.0)
-            imb = (volb / (volb + vola)) if (volb + vola) > 0 else 0.5
+            topb = ws.get("bid_top_qty", 0.0)
+            topa = ws.get("ask_top_qty", 0.0)
+            if (topb == 0.0 or topa == 0.0) or (volb == 0.0 or vola == 0.0):
+                try:
+                    ob = self.exchange.fetch_order_book(sym, limit=5)
+                    bids = ob.get("bids", [])
+                    asks = ob.get("asks", [])
+                    if bids:
+                        bb = float(bids[0][0]); topb = float(bids[0][1])
+                        volb = sum(float(q) for _, q in bids[:5])
+                    if asks:
+                        ba = float(asks[0][0]); topa = float(asks[0][1])
+                        vola = sum(float(q) for _, q in asks[:5])
+                    spread_abs = abs(ba - bb) if (bb and ba) else spread_abs
+                except Exception:
+                    pass
+            imb = (topb / (topb + topa)) if (topb + topa) > 0 else 0.5
 
             mkt = (self.exchange.markets or {}).get(sym, {})
             precision = (mkt.get("precision") or {}).get("price")
@@ -234,6 +259,7 @@ class BinanceExchange:
                 "pct_change_window": float(t.get("percentage") or 0.0) if t else 0.0,
                 "depth": {"buy": volb, "sell": vola},
                 "imbalance": imb,
+                "bid_top_qty": topb, "ask_top_qty": topa,
                 "trade_flow": ws.get("trade_flow", {"buy_ratio":0.5,"streak":0}),
                 "micro_volatility": (spread_abs / (mid or 1.0)) if mid else 0.0,
                 "tick_size": tick_size,
@@ -336,3 +362,42 @@ class BinanceExchange:
             pbtc = 0.0
 
         return float(max_btc * (pbtc or 0.0)) or float(default_usd)
+
+    # ---------- Fees ----------
+    def fee_for(self, symbol: str) -> float:
+        fee = self._fee_cache.get(symbol)
+        if fee is not None:
+            return fee
+        try:
+            info = self.exchange.fetch_trading_fees().get(symbol, {})
+            fee = float(info.get("maker", info.get("taker", 0.001)))
+        except Exception:
+            fee = float((self.exchange.markets.get(symbol, {}) or {}).get("maker", 0.001))
+        self._fee_cache[symbol] = fee
+        return fee
+
+    # ---------- Tendencias ----------
+    def fetch_trend_metrics(self, symbols: List[str]) -> Dict[str, Dict[str, float]]:
+        out: Dict[str, Dict[str, float]] = {}
+        for sym in symbols:
+            trends: Dict[str, float] = {}
+            try:
+                for tf, key, lim in [
+                    ("1w", "trend_w", 2),
+                    ("1d", "trend_d", 2),
+                    ("1h", "trend_h", 24),
+                    ("5m", "trend_m", 12),
+                ]:
+                    try:
+                        ohlcv = self.exchange.fetch_ohlcv(sym, timeframe=tf, limit=lim)
+                        if len(ohlcv) >= 2:
+                            start = float(ohlcv[0][4])
+                            end = float(ohlcv[-1][4])
+                            if start > 0:
+                                trends[key] = (end - start) / start * 100.0
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            out[sym] = trends
+        return out
