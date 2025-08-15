@@ -121,18 +121,25 @@ class Engine(threading.Thread):
 
     # --------------------- Núcleo ---------------------
     def _find_candidates(self, snapshot: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Selecciona pares cuyo movimiento de 1 satoshi supera el coste de comisiones."""
+        """Selecciona pares cuyo movimiento de 1 satoshi supera el coste de comisiones
+        y registra en el log el proceso de búsqueda."""
         fee = float(snapshot.get("config", {}).get("fee_per_side", 0.0))
         thr_pct = fee * 2.0 * 100.0
         cands: List[Dict[str, Any]] = []
+        self.ui_log(f"[ENGINE {self.name}] Buscando pares buenos (umbral {thr_pct:.4f}% basado en comisiones)")
         for p in snapshot.get("pairs", []):
+            sym = p.get("symbol", "")
             mid = float(p.get("mid") or p.get("price_last") or 0.0)
             tick = float(p.get("tick_size") or 1e-8)
             tick_pct = (tick / mid * 100.0) if mid else 0.0
-
             p["tick_pct"] = tick_pct
             if tick_pct > thr_pct:
+                p["is_candidate"] = True
                 cands.append(p)
+                self.ui_log(
+                    f"[ENGINE {self.name}] {sym} tick_pct {tick_pct:.4f}% > {thr_pct:.4f}% -> candidato"
+                )
+        self.ui_log(f"[ENGINE {self.name}] Candidatos encontrados: {len(cands)}")
         return cands
 
     def build_snapshot(self) -> Dict[str, Any]:
@@ -184,8 +191,7 @@ class Engine(threading.Thread):
             "pairs": pairs,
             "config": {"fee_per_side": self.cfg.fee_per_side},
         })
-        if not candidates:
-            candidates = pairs[:5]
+        self.ui_log(f"[ENGINE {self.name}] Evaluados {len(pairs)} pares; {len(candidates)} candidatos")
         snap = {
             "ts": int(time.time()*1000),
             "global_state": {
@@ -384,16 +390,26 @@ def _log_audit(self, event: str, sym: str, detail: str):
                 self._try_fill_sim_orders(snapshot)
 
                 open_count = len(snapshot.get("open_orders", []))
-                candidates = snapshot.get("candidates", []) or self._find_candidates(snapshot)
+                candidates = snapshot.get("candidates", [])
 
                 do_call = False
-                if not self._first_call_done and ((snapshot.get('pairs') and len(snapshot.get('pairs'))>0) or open_count):
+                if not self._first_call_done and (open_count > 0 or len(candidates) > 0):
                     do_call = True
                     self._first_call_done = True
                     self._last_loop_ts = time.monotonic()
 
-                if not do_call and ((snapshot.get('pairs') and len(snapshot.get('pairs'))>0) or open_count):
+                if not do_call and (open_count > 0 or len(candidates) > 0):
                     do_call = self._should_call_llm()
+
+                if do_call:
+                    self.ui_log(
+                        f"[ENGINE {self.name}] Enviando snapshot al LLM ({len(candidates)} candidatos, {open_count} órdenes abiertas)"
+                    )
+                else:
+                    if not candidates:
+                        self.ui_log(f"[ENGINE {self.name}] Skip LLM: no hay pares buenos")
+                    if open_count == 0:
+                        self.ui_log(f"[ENGINE {self.name}] Skip LLM: no hay órdenes abiertas")
 
                                 # Autotrade (sin LLM) si hay buenas condiciones
                 now_ms = time.time()*1000
