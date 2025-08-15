@@ -92,6 +92,20 @@ class LLMClient:
             pass
         return reply
 
+    def ask(self, message: str) -> str:
+        if self._openai:
+            try:
+                resp = self._openai.chat.completions.create(
+                    model=self.model,
+                    messages=[{"role": "user", "content": message}],
+                    temperature=self.temp_ana,
+                    timeout=20,
+                )
+                return resp.choices[0].message.content or ""
+            except Exception:
+                return ""
+        return ""
+
     # -------------------- OpenAI --------------------
     def _propose_openai(self, snapshot: Dict[str, Any]) -> Dict[str, Any]:
         client = self._openai

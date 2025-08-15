@@ -35,7 +35,6 @@ class Engine(threading.Thread):
         self._last_reasons: List[str] = []
         self._first_call_done: bool = False
         self._last_auto_ts: float = 0.0
-
         self._patch_history: List[tuple[Dict[str, Any], str]] = []
         self._last_patch_code: str = ""
 
@@ -168,6 +167,7 @@ class Engine(threading.Thread):
     # --------------------- Núcleo ---------------------
     def _find_candidates(self, snapshot: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Marca todos los pares BTC como candidatos."""
+
         cands: List[Dict[str, Any]] = []
         for p in snapshot.get("pairs", []):
             p["is_candidate"] = True
@@ -253,6 +253,7 @@ class Engine(threading.Thread):
         self.ui_log(
             f"[ENGINE {self.name}] Evaluados {len(pairs)} pares; {len(candidates)} candidatos"
         )
+
         snap = {
             "ts": int(time.time()*1000),
             "global_state": {
