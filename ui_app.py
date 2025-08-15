@@ -192,7 +192,7 @@ class App(tb.Window):
         ]
         for c, txt, w, an in headers:
             self.tree.heading(c, text=txt, command=lambda col=c: self._sort_tree(col, False))
-            self.tree.column(c, width=w, anchor=an, stretch=False)
+            self.tree.column(c, width=w, anchor=an, stretch=True)
         vsb = ttk.Scrollbar(frm_mkt, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=vsb.set)
         self.tree.grid(row=0, column=0, sticky="nsew"); vsb.grid(row=0, column=1, sticky="ns")
@@ -224,7 +224,7 @@ class App(tb.Window):
                                ("price","Precio",120,"e"),
                                ("qty_usd","USD",100,"e"),
                                ("age","Edad(s)",80,"e")]:
-            self.tree_open.heading(c, text=txt); self.tree_open.column(c, width=w, anchor=an, stretch=False)
+            self.tree_open.heading(c, text=txt); self.tree_open.column(c, width=w, anchor=an, stretch=True)
         vsb2 = ttk.Scrollbar(frm_open, orient="vertical", command=self.tree_open.yview)
         self.tree_open.configure(yscrollcommand=vsb2.set)
         self.tree_open.grid(row=0, column=0, sticky="nsew"); vsb2.grid(row=0, column=1, sticky="ns")
@@ -241,7 +241,7 @@ class App(tb.Window):
                                ("mode","Modo",80,"w"),
                                ("price","Precio",120,"e"),
                                ("qty_usd","USD",100,"e")]:
-            self.tree_closed.heading(c, text=txt); self.tree_closed.column(c, width=w, anchor=an, stretch=False)
+            self.tree_closed.heading(c, text=txt); self.tree_closed.column(c, width=w, anchor=an, stretch=True)
         vsb3 = ttk.Scrollbar(frm_closed, orient="vertical", command=self.tree_closed.yview)
         self.tree_closed.configure(yscrollcommand=vsb3.set)
         self.tree_closed.grid(row=0, column=0, sticky="nsew"); vsb3.grid(row=0, column=1, sticky="ns")
@@ -250,10 +250,11 @@ class App(tb.Window):
         right = ttk.Frame(self, padding=(0, 0, 10, 10))
         right.grid(row=1, column=1, sticky="nsew")
         right.columnconfigure(0, weight=1)
-        right.rowconfigure(5, weight=0)
-        right.rowconfigure(6, weight=1)
-        right.rowconfigure(7, weight=0)
-        right.rowconfigure(8, weight=1)
+        right.rowconfigure(4, weight=0)
+        right.rowconfigure(5, weight=1)
+        right.rowconfigure(6, weight=0)
+        right.rowconfigure(7, weight=1)
+
 
         ttk.Label(right, text="Ajustes").grid(row=0, column=0, sticky="w", pady=(0,6))
 
@@ -300,35 +301,29 @@ class App(tb.Window):
         ttk.Entry(frm_llm, textvariable=self.var_llm_secs, width=14).grid(row=1, column=1, sticky="e")
         ttk.Button(frm_llm, text="Aplicar LLM", command=self._apply_llm).grid(row=0, column=2, rowspan=2, padx=6)
 
-        # Estado
-        st = ttk.Labelframe(right, text="Estado", padding=8)
-        st.grid(row=4, column=0, sticky="ew", pady=6)
-        self.lbl_ws = ttk.Label(st, text="WS: 0 ms")
-        self.lbl_rest = ttk.Label(st, text="REST: 0 ms")
-        self.lbl_ws.grid(row=0, column=0, sticky="w")
-        self.lbl_rest.grid(row=0, column=1, sticky="e")
-
         # Consulta LLM
         frm_llm_manual = ttk.Labelframe(right, text="Consulta LLM", padding=8)
-        frm_llm_manual.grid(row=5, column=0, sticky="nsew")
+        frm_llm_manual.grid(row=4, column=0, sticky="nsew")
+
         frm_llm_manual.columnconfigure(0, weight=1)
         self.var_llm_query = tb.StringVar()
         ttk.Entry(frm_llm_manual, textvariable=self.var_llm_query).grid(row=0, column=0, sticky="ew")
         ttk.Button(frm_llm_manual, text="Enviar", command=self._send_llm_query).grid(row=0, column=1, padx=4)
         frm_llm_manual.rowconfigure(1, weight=1)
-        self.txt_llm_resp = ScrolledText(frm_llm_manual, height=6, autohide=True, wrap="word")
+        self.txt_llm_resp = ScrolledText(frm_llm_manual, height=3, autohide=True, wrap="word")
+
         self.txt_llm_resp.grid(row=1, column=0, columnspan=2, sticky="nsew")
 
         # Información / Razones
         frm_info = ttk.Labelframe(right, text="Información / Razones", padding=8)
-        frm_info.grid(row=6, column=0, sticky="nsew", pady=(6, 0))
+        frm_info.grid(row=5, column=0, sticky="nsew", pady=(6, 0))
         frm_info.rowconfigure(0, weight=1); frm_info.columnconfigure(0, weight=1)
-        self.txt_info = ScrolledText(frm_info, height=12, autohide=True, wrap="word")
+        self.txt_info = ScrolledText(frm_info, height=6, autohide=True, wrap="word")
         self.txt_info.grid(row=0, column=0, sticky="nsew")
 
         # Métricas de Score
         frm_met = ttk.Labelframe(right, text="Métricas Score", padding=8)
-        frm_met.grid(row=7, column=0, sticky="ew", pady=6)
+        frm_met.grid(row=6, column=0, sticky="ew", pady=6)
 
         for idx, (key, label) in enumerate([
             ("trend_w", "Trend semanal"),
@@ -348,7 +343,7 @@ class App(tb.Window):
 
         # Log
         frm_log = ttk.Labelframe(right, text="Log", padding=8)
-        frm_log.grid(row=8, column=0, sticky="nsew", pady=6)
+        frm_log.grid(row=7, column=0, sticky="nsew", pady=6)
         frm_log.rowconfigure(0, weight=1); frm_log.columnconfigure(0, weight=1)
         self.txt_log = ScrolledText(frm_log, height=6, autohide=True, wrap="none")
         self.txt_log.grid(row=0, column=0, sticky="nsew")
@@ -357,7 +352,7 @@ class App(tb.Window):
         self.var_bot_sim.trace_add("write", self._on_bot_sim)
         self.var_bot_live.trace_add("write", self._on_bot_live)
         self.var_live_confirm.trace_add("write", self._on_live_confirm)
-        self.tree.bind("<<TreeviewSelect>>", lambda e: self._update_min_marker())
+        self.tree.bind("<<TreeviewSelect>>", self._on_pair_select)
 
     # ------------------- Helpers -------------------
     def _ensure_exchange(self):
@@ -391,10 +386,7 @@ class App(tb.Window):
     def _warmup_load_market(self):
         try:
             self._ensure_exchange()
-            uni = list(dict.fromkeys(
-                self.exchange.fetch_universe("USDT") +
-                self.exchange.fetch_universe("BTC")
-            ))[:100]
+            uni = [u for u in self.exchange.fetch_universe("BTC") if u.endswith("/BTC")][:100]
 
             if uni:
                 pairs = self.exchange.fetch_top_metrics(uni[: min(20, len(uni))])
@@ -444,10 +436,7 @@ class App(tb.Window):
     def _refresh_market_candidates(self):
         try:
             self._ensure_exchange()
-            uni = list(dict.fromkeys(
-                self.exchange.fetch_universe("USDT") +
-                self.exchange.fetch_universe("BTC")
-            ))[:100]
+            uni = [u for u in self.exchange.fetch_universe("BTC") if u.endswith("/BTC")][:100]
 
             if not uni:
                 return
@@ -671,19 +660,25 @@ class App(tb.Window):
         q = self.var_llm_query.get().strip()
         if not q:
             return
-        eng = self._engine_live or self._engine_sim
-        resp = ""
-        if eng and eng.llm:
-            resp = eng.llm.ask(q)
-        else:
-            try:
-                from llm_client import LLMClient
-                llm = LLMClient(model=self.var_llm_model.get(), api_key=self.var_oai_key.get())
-                resp = llm.ask(q)
-            except Exception:
-                resp = ""
-        self.txt_llm_resp.delete("1.0", "end")
-        self.txt_llm_resp.insert("end", resp or "[sin respuesta]")
+        def worker():
+            eng = self._engine_live or self._engine_sim
+            resp = ""
+            if eng and eng.llm:
+                resp = eng.llm.ask(q)
+            else:
+                try:
+                    from llm_client import LLMClient
+                    llm = LLMClient(model=self.var_llm_model.get(), api_key=self.var_oai_key.get())
+                    resp = llm.ask(q)
+                except Exception:
+                    resp = ""
+            def update():
+                self.txt_llm_resp.delete("1.0", "end")
+                self.txt_llm_resp.insert("end", resp or "[sin respuesta]")
+                lines = int(self.txt_llm_resp.index('end-1c').split('.')[0])
+                self.txt_llm_resp.configure(height=min(10, max(3, lines)))
+            self.after(0, update)
+        threading.Thread(target=worker, daemon=True).start()
 
     def _apply_sizes(self):
         # SIM: editable
@@ -750,17 +745,15 @@ class App(tb.Window):
         try:
             if pnlu >= 0: self.lbl_pnl.configure(bootstyle=SUCCESS)
             else: self.lbl_pnl.configure(bootstyle=DANGER)
-        except Exception: pass
-        self.lbl_rest.configure(text=f"REST: {gs.get('latency_rest_ms',0):.0f} ms")
-        self.lbl_ws.configure(text=f"WS: {gs.get('latency_ws_ms',0):.0f} ms")
+        except Exception:
+            pass
 
         # Tablas
         self._refresh_market_table(
             snap.get("pairs", []),
             snap.get("candidates", []),
         )
-        self._refresh_open_orders(snap.get("open_orders", []))
-        self._refresh_closed_orders(snap.get("closed_orders", []))
+        threading.Thread(target=self._refresh_market_candidates, daemon=True).start()
 
         threading.Thread(target=self._refresh_market_candidates, daemon=True).start()
 
@@ -774,8 +767,27 @@ class App(tb.Window):
 
         self.after(4000, self._tick_ui_refresh)
 
+    def _tick_open_orders(self):
+        snap = self._snapshot or {}
+        self._refresh_open_orders(snap.get("open_orders", []))
+        self.after(4000, self._tick_open_orders)
+
+    def _tick_closed_orders(self):
+        snap = self._snapshot or {}
+        self._refresh_closed_orders(snap.get("closed_orders", []))
+        self.after(4000, self._tick_closed_orders)
+
+    def _on_pair_select(self, _event):
+        sel = self.tree.selection()
+        if not sel:
+            return
+        self.after(300, lambda: [self.tree.selection_remove(i) for i in sel])
+
+
     def _refresh_market_table(self, pairs: List[Dict[str, Any]], candidates: List[Dict[str, Any]]):
         cand_syms = {c.get("symbol") for c in candidates}
+        # Solo pares con BTC
+        pairs = [p for p in pairs if str(p.get("symbol","" )).endswith("/BTC")]
         # map current symbols to item ids so we can update or remove rows
         existing_rows = {
             self.tree.set(iid, "symbol"): iid

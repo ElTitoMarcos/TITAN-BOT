@@ -217,7 +217,8 @@ class BinanceExchange:
             volb = (ws.get("depth_buy", 0.0) or 0.0); vola = (ws.get("depth_sell", 0.0) or 0.0)
             topb = ws.get("bid_top_qty", 0.0)
             topa = ws.get("ask_top_qty", 0.0)
-            if (topb == 0.0 and topa == 0.0) or (volb == 0.0 and vola == 0.0):
+            if (topb == 0.0 or topa == 0.0) or (volb == 0.0 or vola == 0.0):
+
                 try:
                     ob = self.exchange.fetch_order_book(sym, limit=5)
                     bids = ob.get("bids", [])
@@ -231,10 +232,7 @@ class BinanceExchange:
                     spread_abs = abs(ba - bb) if (bb and ba) else spread_abs
                 except Exception:
                     pass
-            imb = (volb / (volb + vola)) if (volb + vola) > 0 else 0.5
-            topb = ws.get("bid_top_qty", 0.0)
-            topa = ws.get("ask_top_qty", 0.0)
-
+            imb = (topb / (topb + topa)) if (topb + topa) > 0 else 0.5
             mkt = (self.exchange.markets or {}).get(sym, {})
             precision = (mkt.get("precision") or {}).get("price")
             tick_size = None

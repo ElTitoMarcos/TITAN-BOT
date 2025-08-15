@@ -146,7 +146,7 @@ class Engine(threading.Thread):
         return cands
 
     def build_snapshot(self) -> Dict[str, Any]:
-        universe = self.exchange.fetch_universe("BTC")
+        universe = [u for u in self.exchange.fetch_universe("BTC") if u.endswith("/BTC")]
         universe = list(dict.fromkeys(universe))[:200]
         pairs = self.exchange.fetch_top_metrics(universe)
         try:
@@ -212,7 +212,7 @@ class Engine(threading.Thread):
         self.ui_log(
             f"[ENGINE {self.name}] Evaluados {len(pairs)} pares; {len(candidates)} candidatos"
         )
-
+        
         snap = {
             "ts": int(time.time()*1000),
             "global_state": {
