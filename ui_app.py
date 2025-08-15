@@ -113,7 +113,7 @@ class App(tb.Window):
         self._lock_controls(True)
         self.after(250, self._poll_log_queue)
         self.after(4000, self._tick_ui_refresh)
-        
+
         # Precarga de mercado y balance
         self._warmup_thread = threading.Thread(target=self._warmup_load_market, daemon=True)
         self._warmup_thread.start()
@@ -315,15 +315,15 @@ class App(tb.Window):
         frm_llm_manual.rowconfigure(1, weight=1)
         self.txt_llm_resp = ScrolledText(frm_llm_manual, height=3, autohide=True, wrap="word")
         self.txt_llm_resp.grid(row=1, column=0, columnspan=2, sticky="nsew")
-        ttk.Button(frm_llm_manual, text="Revertir patch", command=self._revert_patch).grid(row=2, column=0, sticky="ew", pady=(4,0))
-        ttk.Button(frm_llm_manual, text="Patch a LIVE", command=self._apply_patch_live).grid(row=2, column=1, sticky="ew", pady=(4,0))
 
         # Información / Razones
         frm_info = ttk.Labelframe(right, text="Información / Razones", padding=8)
         frm_info.grid(row=5, column=0, sticky="nsew", pady=(6, 0))
-        frm_info.rowconfigure(0, weight=1); frm_info.columnconfigure(0, weight=1)
+        frm_info.rowconfigure(0, weight=1); frm_info.columnconfigure(0, weight=1); frm_info.columnconfigure(1, weight=1)
         self.txt_info = ScrolledText(frm_info, height=6, autohide=True, wrap="word")
-        self.txt_info.grid(row=0, column=0, sticky="nsew")
+        self.txt_info.grid(row=0, column=0, columnspan=2, sticky="nsew")
+        ttk.Button(frm_info, text="Revertir patch", command=self._revert_patch).grid(row=1, column=0, sticky="ew", pady=(4,0))
+        ttk.Button(frm_info, text="Patch a LIVE", command=self._apply_patch_live).grid(row=1, column=1, sticky="ew", pady=(4,0))
 
         # Métricas de Score
         frm_met = ttk.Labelframe(right, text="Métricas Score", padding=8)
@@ -394,6 +394,11 @@ class App(tb.Window):
 
             if uni:
                 pairs = self.exchange.fetch_top_metrics(uni[: min(20, len(uni))])
+                try:
+                    self.exchange.ensure_collector([p['symbol'] for p in pairs], interval_ms=800)
+                except Exception:
+                    pass
+
                 store = self.exchange.market_summary_for([p['symbol'] for p in pairs])
                 trends = self.exchange.fetch_trend_metrics([p['symbol'] for p in pairs])
                 for p in pairs:
@@ -445,10 +450,13 @@ class App(tb.Window):
             if not uni:
                 return
             pairs = self.exchange.fetch_top_metrics(uni[: min(20, len(uni))])
+            try:
+                self.exchange.ensure_collector([p['symbol'] for p in pairs], interval_ms=800)
+            except Exception:
+                pass
             store = self.exchange.market_summary_for([p['symbol'] for p in pairs])
             trends = self.exchange.fetch_trend_metrics([p['symbol'] for p in pairs])
             cands: List[Dict[str, Any]] = []
-            self.log_append("[ENGINE] Buscando pares")
 
             for p in pairs:
                 ms = store.get(p['symbol'], {})
@@ -496,7 +504,6 @@ class App(tb.Window):
                 cands.append(p)
             cands.sort(key=lambda x: x.get('score',0.0), reverse=True)
 
-            self.log_append(f"[ENGINE] Candidatos encontrados: {len(cands)}")
             if not ((self._engine_sim and self._engine_sim.is_alive()) or (self._engine_live and self._engine_live.is_alive())):
                 self._snapshot = {**self._snapshot, "pairs": pairs, "candidates": cands}
             self._refresh_market_table(pairs, cands)
@@ -671,7 +678,7 @@ class App(tb.Window):
             self._engine_sim.cfg.weights = dict(self.cfg.weights)
         if self._engine_live:
             self._engine_live.cfg.weights = dict(self.cfg.weights)
-        self._refresh_market_candidates()
+        threading.Thread(target=self._refresh_market_candidates, daemon=True).start()
 
     def _send_llm_query(self):
         q = self.var_llm_query.get().strip()

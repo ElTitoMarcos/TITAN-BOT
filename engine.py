@@ -166,19 +166,16 @@ class Engine(threading.Thread):
 
     # --------------------- Núcleo ---------------------
     def _find_candidates(self, snapshot: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Marca todos los pares BTC como candidatos y registra el proceso."""
-        self.ui_log(f"[ENGINE {self.name}] Buscando pares")
+        """Marca todos los pares BTC como candidatos."""
 
         cands: List[Dict[str, Any]] = []
         for p in snapshot.get("pairs", []):
             p["is_candidate"] = True
             cands.append(p)
-
-        self.ui_log(f"[ENGINE {self.name}] Candidatos encontrados: {len(cands)}")
         return cands
 
     def build_snapshot(self) -> Dict[str, Any]:
-        universe = self.exchange.fetch_universe(None)
+        universe = self.exchange.fetch_universe("BTC")
         universe = list(dict.fromkeys(universe))[:200]
         pairs = self.exchange.fetch_top_metrics(universe)
         try:

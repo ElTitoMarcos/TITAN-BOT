@@ -35,6 +35,11 @@ class BinanceWS:
         return STREAM_URL.format(streams="/".join(parts))
 
     def start(self, symbols: List[str]):
+        symbols = sorted(set(symbols))
+        with self.s.lock:
+            if self.s.running and set(symbols) == set(self.s.symbols):
+                return
+            self.s.symbols = list(symbols)
         url = self._url(symbols)
 
         def on_message(ws, msg):
@@ -158,8 +163,10 @@ class BinanceExchange:
 
     # ---------- WS helpers ----------
     def ensure_collector(self, symbols: List[str], interval_ms: int = 800) -> None:
+        if not symbols:
+            return
         try:
-            self.ws.start(symbols or [])
+            self.ws.start(symbols)
         except Exception:
             pass
 
@@ -238,26 +245,6 @@ class BinanceExchange:
                     topa = float(asks[0][1])
                     vola = sum(float(q) for _, q in asks[:5])
                 spread_abs = abs(ba - bb) if (bb and ba) else spread_abs
-            imb = (topb / (topb + topa)) if (topb + topa) > 0 else 0.5
-
-            topb = ws.get("bid_top_qty", 0.0)
-            topa = ws.get("ask_top_qty", 0.0)
-            if (topb == 0.0 or topa == 0.0) or (volb == 0.0 or vola == 0.0):
-                try:
-                    ob = self.exchange.fetch_order_book(sym, limit=5)
-                    bids = ob.get("bids", [])
-                    asks = ob.get("asks", [])
-                    if bids:
-                        bb = float(bids[0][0])
-                        topb = float(bids[0][1])
-                        volb = sum(float(q) for _, q in bids[:5])
-                    if asks:
-                        ba = float(asks[0][0])
-                        topa = float(asks[0][1])
-                        vola = sum(float(q) for _, q in asks[:5])
-                    spread_abs = abs(ba - bb) if (bb and ba) else spread_abs
-                except Exception:
-                    pass
             imb = (topb / (topb + topa)) if (topb + topa) > 0 else 0.5
 
                 try:
