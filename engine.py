@@ -35,6 +35,7 @@ class Engine(threading.Thread):
         self._last_reasons: List[str] = []
         self._first_call_done: bool = False
         self._last_auto_ts: float = 0.0
+        self._greet_sent: bool = False
 
         os.makedirs(self.cfg.log_dir, exist_ok=True)
         self._audit_file = os.path.join(self.cfg.log_dir, "audit.csv")
@@ -127,7 +128,7 @@ class Engine(threading.Thread):
         for p in snapshot.get("pairs", []):
             mid = float(p.get("mid") or p.get("price_last") or 0.0)
             tick_pct = (1e-8 / mid * 100.0) if mid else 0.0
-            p["tick_pct_sat"] = tick_pct
+            p["tick_pct"] = tick_pct
             if tick_pct > thr_pct:
                 cands.append(p)
         return cands
@@ -377,11 +378,11 @@ def _log_audit(self, event: str, sym: str, detail: str):
         while not self.is_stopped():
             try:
                 snapshot = self.build_snapshot()
+                self.ui_push_snapshot(snapshot)
                 self._try_fill_sim_orders(snapshot)
 
                 open_count = len(snapshot.get("open_orders", []))
-                # Determina los pares candidatos usando el snapshot actual
-                candidates = self._find_candidates(snapshot)
+                candidates = snapshot.get("candidates", []) or self._find_candidates(snapshot)
 
                 do_call = False
                 if not self._first_call_done and ((snapshot.get('pairs') and len(snapshot.get('pairs'))>0) or open_count):
@@ -406,11 +407,19 @@ def _log_audit(self, event: str, sym: str, detail: str):
 
                 actions: List[Dict[str, Any]] = []
                 if do_call:
-                    llm_out = self.llm.propose_actions({
-                        **snapshot,
-                        "config": {**snapshot["config"], "max_actions_per_cycle": self.cfg.llm_max_actions_per_cycle},
-                    })
-                    actions = llm_out.get("actions", [])
+                    try:
+                        greet_msg = self.llm.greet("hola")
+                        if greet_msg:
+                            self.ui_log(f"[LLM] {greet_msg}")
+                    except Exception:
+                        pass
+                    if self._greet_sent:
+                        llm_out = self.llm.propose_actions({
+                            **snapshot,
+                            "config": {**snapshot["config"], "max_actions_per_cycle": self.cfg.llm_max_actions_per_cycle},
+                        })
+                        actions = llm_out.get("actions", [])
+                    self._greet_sent = True
 
                 valid = self.validate_actions(actions, snapshot)
                 if valid:
