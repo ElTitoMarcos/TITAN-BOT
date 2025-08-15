@@ -127,6 +127,10 @@ class Engine(threading.Thread):
         cands: List[Dict[str, Any]] = []
         for p in snapshot.get("pairs", []):
             mid = float(p.get("mid") or p.get("price_last") or 0.0)
+<<<<<< codex/fix-binance-minimum-order-and-api-calls-9nb9vg
+            tick = float(p.get("tick_size") or 1e-8)
+            tick_pct = (tick / mid * 100.0) if mid else 0.0
+=======
 <<<<<< codex/fix-binance-minimum-order-and-api-calls-63gexs
             tick = float(p.get("tick_size") or 1e-8)
             tick_pct = (tick / mid * 100.0) if mid else 0.0
@@ -136,6 +140,7 @@ class Engine(threading.Thread):
 =======
             tick_sz = float(p.get("tick_size") or 1e-8)
             tick_pct = (tick_sz / mid * 100.0) if mid else 0.0
+>>>>>> main
 >>>>>> main
 >>>>>> main
             p["tick_pct"] = tick_pct
@@ -423,9 +428,12 @@ def _log_audit(self, event: str, sym: str, detail: str):
                             self.ui_log(f"[LLM] {greet_msg}")
                     except Exception:
                         pass
+<<<<<< codex/fix-binance-minimum-order-and-api-calls-9nb9vg
+=======
 <<<<<< codex/fix-binance-minimum-order-and-api-calls-63gexs
 =======
 <<<<<< codex/fix-binance-minimum-order-and-api-calls-4tzxux
+>>>>>> main
 >>>>>> main
                     if self._greet_sent:
                         llm_out = self.llm.propose_actions({
@@ -434,6 +442,8 @@ def _log_audit(self, event: str, sym: str, detail: str):
                         })
                         actions = llm_out.get("actions", [])
                     self._greet_sent = True
+<<<<<< codex/fix-binance-minimum-order-and-api-calls-9nb9vg
+=======
 <<<<<< codex/fix-binance-minimum-order-and-api-calls-63gexs
 =======
 =======
@@ -442,6 +452,7 @@ def _log_audit(self, event: str, sym: str, detail: str):
                         "config": {**snapshot["config"], "max_actions_per_cycle": self.cfg.llm_max_actions_per_cycle},
                     })
                     actions = llm_out.get("actions", [])
+>>>>>> main
 >>>>>> main
 >>>>>> main
 
