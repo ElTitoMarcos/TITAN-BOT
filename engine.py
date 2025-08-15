@@ -141,6 +141,7 @@ class Engine(threading.Thread):
         for p in snapshot.get("pairs", []):
             p["is_candidate"] = True
             cands.append(p)
+
         self.ui_log(f"[ENGINE {self.name}] Candidatos encontrados: {len(cands)}")
         return cands
 
@@ -211,6 +212,7 @@ class Engine(threading.Thread):
         self.ui_log(
             f"[ENGINE {self.name}] Evaluados {len(pairs)} pares; {len(candidates)} candidatos"
         )
+        
         snap = {
             "ts": int(time.time()*1000),
             "global_state": {

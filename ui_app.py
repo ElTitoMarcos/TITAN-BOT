@@ -113,6 +113,7 @@ class App(tb.Window):
         self._lock_controls(True)
         self.after(250, self._poll_log_queue)
         self.after(4000, self._tick_ui_refresh)
+
         # Precarga de mercado y balance
         self._warmup_thread = threading.Thread(target=self._warmup_load_market, daemon=True)
         self._warmup_thread.start()
@@ -196,6 +197,7 @@ class App(tb.Window):
         self.tree.configure(yscrollcommand=vsb.set)
         self.tree.grid(row=0, column=0, sticky="nsew"); vsb.grid(row=0, column=1, sticky="ns")
         ttk.Label(frm_mkt, text="Imb: >0.5 compras dominan, <0.5 ventas").grid(row=1, column=0, columnspan=2, sticky="w", pady=(4,0))
+
         # Colores por score (fino) en texto
         self.tree.tag_configure('score95', foreground='#166534')
         self.tree.tag_configure('score90', foreground='#15803d')
@@ -253,6 +255,7 @@ class App(tb.Window):
         right.rowconfigure(6, weight=0)
         right.rowconfigure(7, weight=1)
 
+
         ttk.Label(right, text="Ajustes").grid(row=0, column=0, sticky="w", pady=(0,6))
 
         # Tamaños + toggle mínimo + apply
@@ -301,12 +304,14 @@ class App(tb.Window):
         # Consulta LLM
         frm_llm_manual = ttk.Labelframe(right, text="Consulta LLM", padding=8)
         frm_llm_manual.grid(row=4, column=0, sticky="nsew")
+
         frm_llm_manual.columnconfigure(0, weight=1)
         self.var_llm_query = tb.StringVar()
         ttk.Entry(frm_llm_manual, textvariable=self.var_llm_query).grid(row=0, column=0, sticky="ew")
         ttk.Button(frm_llm_manual, text="Enviar", command=self._send_llm_query).grid(row=0, column=1, padx=4)
         frm_llm_manual.rowconfigure(1, weight=1)
         self.txt_llm_resp = ScrolledText(frm_llm_manual, height=3, autohide=True, wrap="word")
+
         self.txt_llm_resp.grid(row=1, column=0, columnspan=2, sticky="nsew")
 
         # Información / Razones
@@ -319,6 +324,7 @@ class App(tb.Window):
         # Métricas de Score
         frm_met = ttk.Labelframe(right, text="Métricas Score", padding=8)
         frm_met.grid(row=6, column=0, sticky="ew", pady=6)
+
         for idx, (key, label) in enumerate([
             ("trend_w", "Trend semanal"),
             ("trend_d", "Trend diaria"),
@@ -381,6 +387,7 @@ class App(tb.Window):
         try:
             self._ensure_exchange()
             uni = [u for u in self.exchange.fetch_universe("BTC") if u.endswith("/BTC")][:100]
+
             if uni:
                 pairs = self.exchange.fetch_top_metrics(uni[: min(20, len(uni))])
                 store = self.exchange.market_summary_for([p['symbol'] for p in pairs])
@@ -430,6 +437,7 @@ class App(tb.Window):
         try:
             self._ensure_exchange()
             uni = [u for u in self.exchange.fetch_universe("BTC") if u.endswith("/BTC")][:100]
+
             if not uni:
                 return
             pairs = self.exchange.fetch_top_metrics(uni[: min(20, len(uni))])
@@ -470,6 +478,7 @@ class App(tb.Window):
                 p['is_candidate'] = True
                 cands.append(p)
             cands.sort(key=lambda x: x.get('score',0.0), reverse=True)
+
             self.log_append(f"[ENGINE] Candidatos encontrados: {len(cands)}")
             if not ((self._engine_sim and self._engine_sim.is_alive()) or (self._engine_live and self._engine_live.is_alive())):
                 self._snapshot = {**self._snapshot, "pairs": pairs, "candidates": cands}
@@ -746,6 +755,8 @@ class App(tb.Window):
         )
         threading.Thread(target=self._refresh_market_candidates, daemon=True).start()
 
+        threading.Thread(target=self._refresh_market_candidates, daemon=True).start()
+
         # Razones
         reasons = snap.get("reasons", [])
         if reasons:
@@ -771,6 +782,7 @@ class App(tb.Window):
         if not sel:
             return
         self.after(300, lambda: [self.tree.selection_remove(i) for i in sel])
+
 
     def _refresh_market_table(self, pairs: List[Dict[str, Any]], candidates: List[Dict[str, Any]]):
         cand_syms = {c.get("symbol") for c in candidates}

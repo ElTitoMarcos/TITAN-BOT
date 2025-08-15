@@ -218,6 +218,7 @@ class BinanceExchange:
             topb = ws.get("bid_top_qty", 0.0)
             topa = ws.get("ask_top_qty", 0.0)
             if (topb == 0.0 or topa == 0.0) or (volb == 0.0 or vola == 0.0):
+
                 try:
                     ob = self.exchange.fetch_order_book(sym, limit=5)
                     bids = ob.get("bids", [])
@@ -232,7 +233,6 @@ class BinanceExchange:
                 except Exception:
                     pass
             imb = (topb / (topb + topa)) if (topb + topa) > 0 else 0.5
-
             mkt = (self.exchange.markets or {}).get(sym, {})
             precision = (mkt.get("precision") or {}).get("price")
             tick_size = None
