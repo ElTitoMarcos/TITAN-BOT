@@ -6,6 +6,7 @@ from tkinter import ttk
 from typing import Dict, Any, List
 from config import UIColors, Defaults, AppState
 from engine import Engine
+from scoring import compute_score
 
 BADGE_SIM = "🔧SIM"
 BADGE_LIVE = "⚡LIVE"
@@ -108,7 +109,9 @@ class App(tb.Window):
         self._load_saved_keys()
         self._lock_controls(True)
         self.after(250, self._poll_log_queue)
-        self.after(4000, self._tick_ui_refresh)
+
+        self.after(5000, self._tick_ui_refresh)
+
         # Precarga de mercado y balance
         self._warmup_thread = threading.Thread(target=self._warmup_load_market, daemon=True)
         self._warmup_thread.start()
@@ -183,6 +186,7 @@ class App(tb.Window):
             ("price_sats", "Precio (sats)", 120, "e"),
             ("buy_qty", "Buy $", 90, "e"),
             ("sell_qty", "Sell $", 90, "e"),
+
             ("imb", "Imb", 70, "e"),
         ]
         for c, txt, w, an in headers:
@@ -192,6 +196,7 @@ class App(tb.Window):
         self.tree.configure(yscrollcommand=vsb.set)
         self.tree.grid(row=0, column=0, sticky="nsew"); vsb.grid(row=0, column=1, sticky="ns")
         ttk.Label(frm_mkt, text="Imb: >0.5 compras dominan, <0.5 ventas").grid(row=1, column=0, columnspan=2, sticky="w", pady=(4,0))
+
         # Colores por score (fino) en texto
         self.tree.tag_configure('score95', foreground='#166534')
         self.tree.tag_configure('score90', foreground='#15803d')
@@ -202,6 +207,7 @@ class App(tb.Window):
         self.tree.tag_configure('score40', foreground='#f97316')
         self.tree.tag_configure('score30', foreground='#f43f5e')
         self.tree.tag_configure('scoreLow', foreground='#b91c1c')
+
         self.tree.tag_configure('veto', background='#ef4444', foreground='white')
         self.tree.tag_configure('candidate', font=('Consolas', 10, 'bold'))
 
@@ -642,7 +648,8 @@ class App(tb.Window):
                 self.txt_info.insert("end", f"• {r}\n")
                 self.log_append(f"[ENGINE] {r}")
 
-        self.after(4000, self._tick_ui_refresh)
+        self.after(5000, self._tick_ui_refresh)
+
 
     def _refresh_market_table(self, pairs: List[Dict[str, Any]], candidates: List[Dict[str, Any]]):
         cand_syms = {c.get("symbol") for c in candidates}
@@ -662,6 +669,7 @@ class App(tb.Window):
             best_ask = float(p.get("best_ask", 0.0) or 0.0)
             buy_usd = topb_qty * best_bid * btc_usd
             sell_usd = topa_qty * best_ask * btc_usd
+
             values = (
                 sym,
                 f"{p.get('score',0.0):.1f}",
@@ -669,6 +677,7 @@ class App(tb.Window):
                 self._fmt_sats(p.get('price_last',0.0)),
                 f"{buy_usd:.2f}",
                 f"{sell_usd:.2f}",
+
                 f"{p.get('imbalance',0.5):.2f}",
             )
             item = existing_rows.pop(sym, None)
