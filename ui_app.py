@@ -148,6 +148,7 @@ class App(tb.Window):
         self.tree.tag_configure('score50', background='#fbbf24')
         self.tree.tag_configure('scoreLow', background='#9ca3af')
         self.tree.tag_configure('veto', background='#ef4444', foreground='white')
+        self.tree.tag_configure('candidate', font=('Consolas', 10, 'bold'))
 
         # Órdenes abiertas
         frm_open = ttk.Labelframe(left, text="Órdenes abiertas", padding=6)
@@ -298,7 +299,7 @@ class App(tb.Window):
             if uni:
                 pairs = self.exchange.fetch_top_metrics(uni[: min(20, len(uni))])
                 if not self._snapshot:
-                    self._refresh_market_table(pairs)
+                    self._refresh_market_table(pairs, [])
             # Mínimo global BTC en el marcador
             try:
                 min_usd = self.exchange.global_min_notional_usd()
@@ -480,16 +481,7 @@ class App(tb.Window):
             try:
                 self._ensure_exchange()
                 min_usd = self.exchange.global_min_notional_usd()
-                usd = float(min_usd) + 0.01
-
-                usd = float(min_usd) + 0.01
-
                 usd = float(min_usd) + 0.1
-
-                usd = float(min_usd) + 0.01
-
-                usd = float(min_usd) + 0.1
-
                 self.var_size_live.set(round(usd, 2))
                 if self._engine_live:
                     self._engine_live.cfg.size_usd_live = float(usd)
@@ -547,7 +539,10 @@ class App(tb.Window):
         self.lbl_ws.configure(text=f"WS: {gs.get('latency_ws_ms',0):.0f} ms")
 
         # Tablas
-        self._refresh_market_table(snap.get("candidates") or snap.get("pairs", []))
+        self._refresh_market_table(
+            snap.get("pairs", []),
+            snap.get("candidates", []),
+        )
         self._refresh_open_orders(snap.get("open_orders", []))
         self._refresh_closed_orders(snap.get("closed_orders", []))
 
@@ -561,17 +556,24 @@ class App(tb.Window):
 
         self.after(1000, self._tick_ui_refresh)
 
-    def _refresh_market_table(self, pairs: List[Dict[str, Any]]):
+    def _refresh_market_table(self, pairs: List[Dict[str, Any]], candidates: List[Dict[str, Any]]):
         for i in self.tree.get_children():
             self.tree.delete(i)
+        cand_syms = {c.get("symbol") for c in candidates}
         for p in pairs:
-            item = self.tree.insert("", "end", values=(
-                p.get("symbol",""),
-                f"{p.get('score',0.0):.1f}",
-                f"{p.get('pct_change_window',0.0):+.2f}",
-                f"{(p.get('price_last',0.0)*1e8):.0f}",
-                f"{(p.get('depth',{}).get('buy',0.0)+p.get('depth',{}).get('sell',0.0))/1000:.1f}",
-            ))
+            sym = p.get("symbol", "")
+            display_sym = f"★ {sym}" if sym in cand_syms else sym
+            item = self.tree.insert(
+                "",
+                "end",
+                values=(
+                    display_sym,
+                    f"{p.get('score',0.0):.1f}",
+                    f"{p.get('pct_change_window',0.0):+.2f}",
+                    f"{(p.get('price_last',0.0)*1e8):.0f}",
+                    f"{(p.get('depth',{}).get('buy',0.0)+p.get('depth',{}).get('sell',0.0))/1000:.1f}",
+                ),
+            )
             try:
                 sc = float(p.get('score',0.0))
                 tag = 'scoreLow'
@@ -580,7 +582,10 @@ class App(tb.Window):
                 elif sc >= 65: tag = 'score65'
                 elif sc >= 60: tag = 'score64'
                 elif sc >= 50: tag = 'score59'
-                self.tree.item(item, tags=(tag,))
+                tags = [tag]
+                if sym in cand_syms:
+                    tags.append('candidate')
+                self.tree.item(item, tags=tuple(tags))
             except Exception:
                 pass
 
