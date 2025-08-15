@@ -309,6 +309,33 @@ class App(tb.Window):
         except Exception as e:
             self.log_append(f"[ENGINE] Warmup error: {e}")
 
+    def _refresh_market_candidates(self):
+        try:
+            self._ensure_exchange()
+            uni = self.exchange.fetch_universe("BTC")[:100]
+            if not uni:
+                return
+            pairs = self.exchange.fetch_top_metrics(uni[: min(20, len(uni))])
+            fee = float(self.cfg.fee_per_side)
+            thr_pct = fee * 2.0 * 100.0
+            cands: List[Dict[str, Any]] = []
+            self.log_append(f"[ENGINE] Buscando pares buenos (umbral {thr_pct:.4f}% basado en comisiones)")
+            for p in pairs:
+                sym = p.get("symbol", "")
+                mid = float(p.get("mid") or p.get("price_last") or 0.0)
+                tick = float(p.get("tick_size") or 1e-8)
+                tick_pct = (tick / mid * 100.0) if mid else 0.0
+                p["tick_pct"] = tick_pct
+                if tick_pct > thr_pct:
+                    p["is_candidate"] = True
+                    cands.append(p)
+                    self.log_append(f"[ENGINE] {sym} tick_pct {tick_pct:.4f}% > {thr_pct:.4f}% -> candidato")
+            self.log_append(f"[ENGINE] Candidatos encontrados: {len(cands)}")
+            self._snapshot = {**self._snapshot, "pairs": pairs, "candidates": cands}
+            self._refresh_market_table(pairs, cands)
+        except Exception as e:
+            self.log_append(f"[ENGINE] Error al refrescar mercado: {e}")
+
     # ------------------- Engine binding -------------------
     def _on_bot_sim(self, *_):
         en = bool(self.var_bot_sim.get())
@@ -453,6 +480,7 @@ class App(tb.Window):
             self._save_api_keys()
             self._lock_controls(False)
             self.log_append("[APP] APIs verificadas. Desbloqueando interfaz.")
+            self._refresh_market_candidates()
         else:
             self.log_append("[APP] Error verificando APIs. Revísalas e intenta nuevamente.")
 

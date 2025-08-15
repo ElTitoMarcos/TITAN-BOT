@@ -191,8 +191,7 @@ class Engine(threading.Thread):
             "pairs": pairs,
             "config": {"fee_per_side": self.cfg.fee_per_side},
         })
-        if not candidates:
-            candidates = pairs[:5]
+        
         self.ui_log(f"[ENGINE {self.name}] Evaluados {len(pairs)} pares; {len(candidates)} candidatos")
         snap = {
             "ts": int(time.time()*1000),
@@ -392,16 +391,26 @@ def _log_audit(self, event: str, sym: str, detail: str):
                 self._try_fill_sim_orders(snapshot)
 
                 open_count = len(snapshot.get("open_orders", []))
-                candidates = snapshot.get("candidates", []) or self._find_candidates(snapshot)
+                candidates = snapshot.get("candidates", [])
 
                 do_call = False
-                if not self._first_call_done and ((snapshot.get('pairs') and len(snapshot.get('pairs'))>0) or open_count):
+                if not self._first_call_done and (open_count > 0 or len(candidates) > 0):
                     do_call = True
                     self._first_call_done = True
                     self._last_loop_ts = time.monotonic()
 
-                if not do_call and ((snapshot.get('pairs') and len(snapshot.get('pairs'))>0) or open_count):
+                if not do_call and (open_count > 0 or len(candidates) > 0):
                     do_call = self._should_call_llm()
+
+                if do_call:
+                    self.ui_log(
+                        f"[ENGINE {self.name}] Enviando snapshot al LLM ({len(candidates)} candidatos, {open_count} órdenes abiertas)"
+                    )
+                else:
+                    if not candidates:
+                        self.ui_log(f"[ENGINE {self.name}] Skip LLM: no hay pares buenos")
+                    if open_count == 0:
+                        self.ui_log(f"[ENGINE {self.name}] Skip LLM: no hay órdenes abiertas")
 
                                 # Autotrade (sin LLM) si hay buenas condiciones
                 now_ms = time.time()*1000
