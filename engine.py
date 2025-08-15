@@ -35,6 +35,9 @@ class Engine(threading.Thread):
         self._last_reasons: List[str] = []
         self._first_call_done: bool = False
         self._last_auto_ts: float = 0.0
+        self._patch_history: List[tuple[Dict[str, Any], str]] = []
+        self._last_patch_code: str = ""
+
 
         os.makedirs(self.cfg.log_dir, exist_ok=True)
         self._audit_file = os.path.join(self.cfg.log_dir, "audit.csv")
@@ -48,6 +51,35 @@ class Engine(threading.Thread):
 
     def is_stopped(self) -> bool:
         return self._stop.is_set()
+
+    # --------------------- Patches LLM ---------------------
+    def apply_llm_patch(self, code: str):
+        backup: Dict[str, Any] = {}
+        local_ns: Dict[str, Any] = {}
+        try:
+            exec(code, {}, local_ns)
+            for k, v in local_ns.items():
+                backup[k] = getattr(self, k, None)
+                setattr(self, k, v)
+            self._patch_history.append((backup, code))
+            self._last_patch_code = code
+            self.ui_log(f"[LLM PATCH] aplicado: {list(local_ns.keys())}")
+        except Exception as e:
+            self.ui_log(f"[LLM PATCH] error: {e}")
+
+    def revert_last_patch(self):
+        if not self._patch_history:
+            return
+        backup, _ = self._patch_history.pop()
+        for k, v in backup.items():
+            if v is None:
+                try:
+                    delattr(self, k)
+                except Exception:
+                    pass
+            else:
+                setattr(self, k, v)
+        self.ui_log("[LLM PATCH] revertido")
 
     # --------------------- Helpers simulación ---------------------
     def _sim_queue_limit(self, sym: str, price: float, qty_usd: float, side: str) -> str:
@@ -136,17 +168,18 @@ class Engine(threading.Thread):
     # --------------------- Núcleo ---------------------
     def _find_candidates(self, snapshot: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Marca todos los pares BTC como candidatos y registra el proceso."""
-        self.ui_log(f"[ENGINE {self.name}] Buscando pares BTC")
+        self.ui_log(f"[ENGINE {self.name}] Buscando pares")
+
         cands: List[Dict[str, Any]] = []
         for p in snapshot.get("pairs", []):
             p["is_candidate"] = True
             cands.append(p)
-
+            
         self.ui_log(f"[ENGINE {self.name}] Candidatos encontrados: {len(cands)}")
         return cands
 
     def build_snapshot(self) -> Dict[str, Any]:
-        universe = [u for u in self.exchange.fetch_universe("BTC") if u.endswith("/BTC")]
+        universe = self.exchange.fetch_universe(None)
         universe = list(dict.fromkeys(universe))[:200]
         pairs = self.exchange.fetch_top_metrics(universe)
         try:
@@ -189,6 +222,18 @@ class Engine(threading.Thread):
             p['imbalance'] = features['imbalance']
             p['depth'] = {"buy": features['depth_buy'], "sell": features['depth_sell']}
             p["score"] = compute_score(features)
+            tot = features['best_bid_qty'] + features['best_ask_qty']
+            p['pressure'] = features['best_bid_qty']/tot if tot else 0.0
+            p['flow'] = features.get('trade_flow_buy_ratio',0.5)
+            p['trend_w'] = features['trend_w']
+            p['trend_d'] = features['trend_d']
+            p['trend_h'] = features['trend_h']
+            p['trend_m'] = features['trend_m']
+            p['depth_buy'] = features['depth_buy']
+            p['depth_sell'] = features['depth_sell']
+            p['momentum'] = abs(features.get('pct_change_window',0.0))
+            p['spread_abs'] = features['spread_abs']
+            p['micro_volatility'] = features['micro_volatility']
 
         pairs.sort(key=lambda x: (-x.get("score", 0.0), -x.get("edge_est_bps", 0.0)))
         pairs = pairs[: self.cfg.topN]
@@ -212,7 +257,7 @@ class Engine(threading.Thread):
         self.ui_log(
             f"[ENGINE {self.name}] Evaluados {len(pairs)} pares; {len(candidates)} candidatos"
         )
-        
+
         snap = {
             "ts": int(time.time()*1000),
             "global_state": {
@@ -465,6 +510,9 @@ def _log_audit(self, event: str, sym: str, detail: str):
                         **snapshot,
                         "config": {**snapshot["config"], "max_actions_per_cycle": self.cfg.llm_max_actions_per_cycle},
                     })
+                    patch_code = llm_out.get("patch") or llm_out.get("patch_code")
+                    if patch_code:
+                        self.apply_llm_patch(str(patch_code))
                     actions = llm_out.get("actions", [])
 
                 valid = self.validate_actions(actions, snapshot)

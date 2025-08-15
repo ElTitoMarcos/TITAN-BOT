@@ -218,6 +218,20 @@ class BinanceExchange:
             topb = ws.get("bid_top_qty", 0.0)
             topa = ws.get("ask_top_qty", 0.0)
             if (topb == 0.0 or topa == 0.0) or (volb == 0.0 or vola == 0.0):
+                try:
+                    ob = self.exchange.fetch_order_book(sym, limit=5)
+                    bids = ob.get("bids", [])
+                    asks = ob.get("asks", [])
+                    if bids:
+                        bb = float(bids[0][0]); topb = float(bids[0][1])
+                        volb = sum(float(q) for _, q in bids[:5])
+                    if asks:
+                        ba = float(asks[0][0]); topa = float(asks[0][1])
+                        vola = sum(float(q) for _, q in asks[:5])
+                    spread_abs = abs(ba - bb) if (bb and ba) else spread_abs
+                except Exception:
+                    pass
+            imb = (topb / (topb + topa)) if (topb + topa) > 0 else 0.5
 
                 try:
                     ob = self.exchange.fetch_order_book(sym, limit=5)
