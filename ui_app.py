@@ -103,6 +103,9 @@ class App(tb.Window):
         self._engine_live: Engine | None = None
         self.exchange = None
 
+        self.metric_defaults = dict(self.cfg.weights)
+        self.metric_vars: Dict[str, tb.BooleanVar] = {}
+
         self._keys_file = os.path.join(os.path.dirname(__file__), ".api_keys.json")
 
         self._build_ui()
@@ -194,7 +197,7 @@ class App(tb.Window):
         self.tree.configure(yscrollcommand=vsb.set)
         self.tree.grid(row=0, column=0, sticky="nsew"); vsb.grid(row=0, column=1, sticky="ns")
         ttk.Label(frm_mkt, text="Imb: >0.5 compras dominan, <0.5 ventas").grid(row=1, column=0, columnspan=2, sticky="w", pady=(4,0))
-
+        
         # Colores por score (fino) en texto
         self.tree.tag_configure('score95', foreground='#166534')
         self.tree.tag_configure('score90', foreground='#15803d')
@@ -248,7 +251,10 @@ class App(tb.Window):
         right.grid(row=1, column=1, sticky="nsew")
         right.columnconfigure(0, weight=1)
         right.rowconfigure(5, weight=1)
-        right.rowconfigure(6, weight=1)
+        right.rowconfigure(6, weight=0)
+        right.rowconfigure(7, weight=0)
+        right.rowconfigure(8, weight=1)
+
 
         ttk.Label(right, text="Ajustes").grid(row=0, column=0, sticky="w", pady=(0,6))
 
@@ -303,16 +309,46 @@ class App(tb.Window):
         self.lbl_ws.grid(row=0, column=0, sticky="w")
         self.lbl_rest.grid(row=0, column=1, sticky="e")
 
-        # Info / razones
+        # Información / Razones
         frm_info = ttk.Labelframe(right, text="Información / Razones", padding=8)
         frm_info.grid(row=5, column=0, sticky="nsew", pady=(6, 0))
         frm_info.rowconfigure(0, weight=1); frm_info.columnconfigure(0, weight=1)
         self.txt_info = ScrolledText(frm_info, height=12, autohide=True, wrap="word")
         self.txt_info.grid(row=0, column=0, sticky="nsew")
 
-        # Log debajo de información
+        # Métricas de Score
+        frm_met = ttk.Labelframe(right, text="Métricas Score", padding=8)
+        frm_met.grid(row=6, column=0, sticky="ew", pady=6)
+        for idx, (key, label) in enumerate([
+            ("trend_w", "Trend semanal"),
+            ("trend_d", "Trend diaria"),
+            ("pressure", "Presión libro"),
+            ("flow", "Flujo órdenes"),
+            ("trend_h", "Trend horas"),
+            ("depth", "Profundidad"),
+            ("trend_m", "Trend minutos"),
+            ("momentum", "Momentum"),
+            ("spread", "Spread"),
+            ("microvol", "Microvol"),
+        ]):
+            var = tb.BooleanVar(value=self.cfg.weights.get(key, 0) > 0)
+            self.metric_vars[key] = var
+            ttk.Checkbutton(frm_met, text=label, variable=var, command=self._apply_metric_weights).grid(row=idx//2, column=idx%2, sticky="w")
+
+        # Consulta LLM
+        frm_llm_manual = ttk.Labelframe(right, text="Consulta LLM", padding=8)
+        frm_llm_manual.grid(row=7, column=0, sticky="nsew")
+        frm_llm_manual.columnconfigure(0, weight=1)
+        self.var_llm_query = tb.StringVar()
+        ttk.Entry(frm_llm_manual, textvariable=self.var_llm_query).grid(row=0, column=0, sticky="ew")
+        ttk.Button(frm_llm_manual, text="Enviar", command=self._send_llm_query).grid(row=0, column=1, padx=4)
+        frm_llm_manual.rowconfigure(1, weight=1)
+        self.txt_llm_resp = ScrolledText(frm_llm_manual, height=6, autohide=True, wrap="word")
+        self.txt_llm_resp.grid(row=1, column=0, columnspan=2, sticky="nsew")
+
+        # Log
         frm_log = ttk.Labelframe(right, text="Log", padding=8)
-        frm_log.grid(row=6, column=0, sticky="nsew", pady=6)
+        frm_log.grid(row=8, column=0, sticky="nsew", pady=6)
         frm_log.rowconfigure(0, weight=1); frm_log.columnconfigure(0, weight=1)
         self.txt_log = ScrolledText(frm_log, height=6, autohide=True, wrap="none")
         self.txt_log.grid(row=0, column=0, sticky="nsew")
@@ -355,7 +391,11 @@ class App(tb.Window):
     def _warmup_load_market(self):
         try:
             self._ensure_exchange()
-            uni = self.exchange.fetch_universe(self.cfg.universe_quote)[:100]
+            uni = list(dict.fromkeys(
+                self.exchange.fetch_universe("USDT") +
+                self.exchange.fetch_universe("BTC")
+            ))[:100]
+
             if uni:
                 pairs = self.exchange.fetch_top_metrics(uni[: min(20, len(uni))])
                 if not self._snapshot:
@@ -372,18 +412,23 @@ class App(tb.Window):
     def _refresh_market_candidates(self):
         try:
             self._ensure_exchange()
-            uni = self.exchange.fetch_universe(self.cfg.universe_quote)[:100]
+            uni = list(dict.fromkeys(
+                self.exchange.fetch_universe("USDT") +
+                self.exchange.fetch_universe("BTC")
+            ))[:100]
+
             if not uni:
                 return
             pairs = self.exchange.fetch_top_metrics(uni[: min(20, len(uni))])
-            fee = float(self.cfg.fee_per_side)
-            thr_pct = fee * 2.0 * 100.0
             cands: List[Dict[str, Any]] = []
-            self.log_append(f"[ENGINE] Buscando pares buenos (umbral {thr_pct:.4f}% basado en comisiones)")
+            self.log_append("[ENGINE] Buscando pares buenos (umbral dinámico por comisiones)")
             for p in pairs:
                 mid = float(p.get("mid") or p.get("price_last") or 0.0)
                 tick = float(p.get("tick_size") or 1e-8)
                 tick_pct = (tick / mid * 100.0) if mid else 0.0
+                sym = p.get("symbol", "")
+                fee = self.exchange.fee_for(sym)
+                thr_pct = fee * 2.0 * 100.0
                 p["tick_pct"] = tick_pct
                 if tick_pct > thr_pct:
                     p["is_candidate"] = True
@@ -555,6 +600,33 @@ class App(tb.Window):
             self._engine_live._last_loop_ts = time.monotonic()
         self.log_append("[LLM] Configuración aplicada.")
 
+    def _apply_metric_weights(self):
+        for key, var in self.metric_vars.items():
+            self.cfg.weights[key] = self.metric_defaults.get(key, 0) if var.get() else 0
+        if self._engine_sim:
+            self._engine_sim.cfg.weights = dict(self.cfg.weights)
+        if self._engine_live:
+            self._engine_live.cfg.weights = dict(self.cfg.weights)
+        self._refresh_market_candidates()
+
+    def _send_llm_query(self):
+        q = self.var_llm_query.get().strip()
+        if not q:
+            return
+        eng = self._engine_live or self._engine_sim
+        resp = ""
+        if eng and eng.llm:
+            resp = eng.llm.ask(q)
+        else:
+            try:
+                from llm_client import LLMClient
+                llm = LLMClient(model=self.var_llm_model.get(), api_key=self.var_oai_key.get())
+                resp = llm.ask(q)
+            except Exception:
+                resp = ""
+        self.txt_llm_resp.delete("1.0", "end")
+        self.txt_llm_resp.insert("end", resp or "[sin respuesta]")
+
     def _apply_sizes(self):
         # SIM: editable
         try:
@@ -634,7 +706,6 @@ class App(tb.Window):
 
         now = time.time()
         if now - getattr(self, "_last_cand_refresh", 0) > 30:
-
             self._last_cand_refresh = now
             threading.Thread(target=self._refresh_market_candidates, daemon=True).start()
 
@@ -647,7 +718,6 @@ class App(tb.Window):
                 self.log_append(f"[ENGINE] {r}")
 
         self.after(4000, self._tick_ui_refresh)
-
 
     def _refresh_market_table(self, pairs: List[Dict[str, Any]], candidates: List[Dict[str, Any]]):
         cand_syms = {c.get("symbol") for c in candidates}
@@ -668,7 +738,6 @@ class App(tb.Window):
             quote_usd = self.exchange._quote_to_usd(quote) or 0.0
             buy_usd = topb_qty * best_bid * quote_usd
             sell_usd = topa_qty * best_ask * quote_usd
-
             values = (
                 sym,
                 f"{p.get('score',0.0):.1f}",

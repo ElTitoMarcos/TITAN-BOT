@@ -121,6 +121,8 @@ class BinanceWS:
 
 class BinanceExchange:
     _cached_universe: Dict[str, List[str]] = {}
+    _fee_cache: Dict[str, float] = {}
+
 
     def __init__(self, rate_limit=True, sandbox=False):
         self.exchange = ccxt.binance({
@@ -214,6 +216,22 @@ class BinanceExchange:
             mid = ws.get("mid") or ((bb+ba)/2.0 if (bb and ba) else last)
             spread_abs = abs(ba - bb) if (bb and ba) else 0.0
             volb = (ws.get("depth_buy", 0.0) or 0.0); vola = (ws.get("depth_sell", 0.0) or 0.0)
+            topb = ws.get("bid_top_qty", 0.0)
+            topa = ws.get("ask_top_qty", 0.0)
+            if (topb == 0.0 and topa == 0.0) or (volb == 0.0 and vola == 0.0):
+                try:
+                    ob = self.exchange.fetch_order_book(sym, limit=5)
+                    bids = ob.get("bids", [])
+                    asks = ob.get("asks", [])
+                    if bids:
+                        bb = float(bids[0][0]); topb = float(bids[0][1])
+                        volb = sum(float(q) for _, q in bids[:5])
+                    if asks:
+                        ba = float(asks[0][0]); topa = float(asks[0][1])
+                        vola = sum(float(q) for _, q in asks[:5])
+                    spread_abs = abs(ba - bb) if (bb and ba) else spread_abs
+                except Exception:
+                    pass
             imb = (volb / (volb + vola)) if (volb + vola) > 0 else 0.5
             topb = ws.get("bid_top_qty", 0.0)
             topa = ws.get("ask_top_qty", 0.0)
@@ -347,3 +365,42 @@ class BinanceExchange:
             pbtc = 0.0
 
         return float(max_btc * (pbtc or 0.0)) or float(default_usd)
+
+    # ---------- Fees ----------
+    def fee_for(self, symbol: str) -> float:
+        fee = self._fee_cache.get(symbol)
+        if fee is not None:
+            return fee
+        try:
+            info = self.exchange.fetch_trading_fees().get(symbol, {})
+            fee = float(info.get("maker", info.get("taker", 0.001)))
+        except Exception:
+            fee = float((self.exchange.markets.get(symbol, {}) or {}).get("maker", 0.001))
+        self._fee_cache[symbol] = fee
+        return fee
+
+    # ---------- Tendencias ----------
+    def fetch_trend_metrics(self, symbols: List[str]) -> Dict[str, Dict[str, float]]:
+        out: Dict[str, Dict[str, float]] = {}
+        for sym in symbols:
+            trends: Dict[str, float] = {}
+            try:
+                for tf, key, lim in [
+                    ("1w", "trend_w", 2),
+                    ("1d", "trend_d", 2),
+                    ("1h", "trend_h", 24),
+                    ("5m", "trend_m", 12),
+                ]:
+                    try:
+                        ohlcv = self.exchange.fetch_ohlcv(sym, timeframe=tf, limit=lim)
+                        if len(ohlcv) >= 2:
+                            start = float(ohlcv[0][4])
+                            end = float(ohlcv[-1][4])
+                            if start > 0:
+                                trends[key] = (end - start) / start * 100.0
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            out[sym] = trends
+        return out

@@ -30,11 +30,16 @@ class Defaults:
 
     # Selección / ranking
     weights: Dict[str, int] = field(default_factory=lambda: {
-        "imbalance": 30,
-        "spread_over_tick_price": 20,
-        "trade_flow": 20,
-        "base_volume": 15,
-        "micro_volatility": 15,
+        "trend_w": 25,
+        "trend_d": 20,
+        "pressure": 15,
+        "flow": 12,
+        "trend_h": 10,
+        "depth": 8,
+        "trend_m": 5,
+        "momentum": 3,
+        "spread": 1,
+        "microvol": 1,
     })
     pct_window: str = "1h"  # "24h"|"1h"|"5m"
 

@@ -140,14 +140,15 @@ class Engine(threading.Thread):
     def _find_candidates(self, snapshot: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Selecciona pares cuyo movimiento de 1 satoshi supera el coste de comisiones
         y registra en el log el proceso de búsqueda."""
-        fee = float(snapshot.get("config", {}).get("fee_per_side", 0.0))
-        thr_pct = fee * 2.0 * 100.0
+        self.ui_log(f"[ENGINE {self.name}] Buscando pares buenos (umbral dinámico por comisiones)")
         cands: List[Dict[str, Any]] = []
-        self.ui_log(f"[ENGINE {self.name}] Buscando pares buenos (umbral {thr_pct:.4f}% basado en comisiones)")
         for p in snapshot.get("pairs", []):
             mid = float(p.get("mid") or p.get("price_last") or 0.0)
             tick = float(p.get("tick_size") or 1e-8)
             tick_pct = (tick / mid * 100.0) if mid else 0.0
+            sym = p.get("symbol", "")
+            fee = self.exchange.fee_for(sym)
+            thr_pct = fee * 2.0 * 100.0
             p["tick_pct"] = tick_pct
             if tick_pct > thr_pct:
                 p["is_candidate"] = True
@@ -156,14 +157,15 @@ class Engine(threading.Thread):
         return cands
 
     def build_snapshot(self) -> Dict[str, Any]:
-        universe = self.exchange.fetch_universe(self.cfg.universe_quote)[:200]
+        universe = self.exchange.fetch_universe("USDT") + self.exchange.fetch_universe("BTC")
+        universe = list(dict.fromkeys(universe))[:200]
         pairs = self.exchange.fetch_top_metrics(universe)
-        # Collector for selected symbols
         try:
             self.exchange.ensure_collector([p['symbol'] for p in pairs], interval_ms=800)
         except Exception:
             pass
 
+        trends = self.exchange.fetch_trend_metrics([p['symbol'] for p in pairs])
         store = self.exchange.market_summary_for([pp['symbol'] for pp in pairs])
         for p in pairs:
             ms = store.get(p['symbol'], {})
@@ -171,6 +173,7 @@ class Engine(threading.Thread):
             mid = ms.get('mid', p.get('mid', 0.0))
             p['mid'] = mid
             p['spread_pct'] = float(ms.get('spread_pct', 0.0))
+            tr = trends.get(p['symbol'], {})
             features = {
                 "imbalance": ms.get("imbalance", p.get("imbalance", 0.5)),
                 "spread_abs": ms.get("spread_abs", abs(p.get("best_ask",0.0)-p.get("best_bid",0.0))),
@@ -185,6 +188,10 @@ class Engine(threading.Thread):
                 "tick_price_bps": p.get("tick_price_bps", 8.0),
                 "base_volume": p.get("depth", {}).get("buy", 0.0) + p.get("depth", {}).get("sell", 0.0),
                 "micro_volatility": p.get("micro_volatility", 0.0),
+                "trend_w": tr.get("trend_w", 0.0),
+                "trend_d": tr.get("trend_d", 0.0),
+                "trend_h": tr.get("trend_h", 0.0),
+                "trend_m": tr.get("trend_m", 0.0),
                 "weights": self.cfg.weights,
             }
             p["score"] = compute_score(features)
