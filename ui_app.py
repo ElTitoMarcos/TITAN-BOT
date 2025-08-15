@@ -52,6 +52,42 @@ class App(tb.Window):
         except Exception:
             pass
 
+    def _fmt_sats(self, price: float) -> str:
+        """Formato legible para precios en satoshis"""
+        try:
+            sats = int(float(price) * 1e8)
+        except Exception:
+            sats = 0
+        if sats >= 1000:
+            return f"{sats:,}".replace(",", ".")
+        return str(sats)
+
+    def _coerce(self, val: str, col: str):
+        v = str(val).replace("★ ", "")
+        if col == "symbol":
+            return v
+        if col == "price_sats":
+            v = v.replace(".", "")
+        try:
+            return float(v)
+        except Exception:
+            return v
+
+    def _sort_tree(self, col: str, reverse: bool, preserve: bool = False):
+        data = [
+            (self._coerce(self.tree.set(k, col), col), k)
+            for k in self.tree.get_children("")
+        ]
+        try:
+            data.sort(reverse=reverse)
+        except Exception:
+            pass
+        for idx, (_, k) in enumerate(data):
+            self.tree.move(k, "", idx)
+        if not preserve:
+            self._sort_col, self._sort_reverse = col, reverse
+            self.tree.heading(col, command=lambda: self._sort_tree(col, not reverse))
+
     def __init__(self):
         super().__init__(title="AutoBTC - Punto a Punto", themename="cyborg")
         self.geometry("1400x860")
@@ -72,7 +108,7 @@ class App(tb.Window):
         self._load_saved_keys()
         self._lock_controls(True)
         self.after(250, self._poll_log_queue)
-        self.after(800, self._tick_ui_refresh)
+        self.after(500, self._tick_ui_refresh)
         # Precarga de mercado y balance
         self._warmup_thread = threading.Thread(target=self._warmup_load_market, daemon=True)
         self._warmup_thread.start()
@@ -126,16 +162,33 @@ class App(tb.Window):
         frm_mkt = ttk.Labelframe(left, text="Mercado", padding=6)
         frm_mkt.grid(row=0, column=0, sticky="nsew", pady=(0,8))
         frm_mkt.rowconfigure(0, weight=1); frm_mkt.columnconfigure(0, weight=1)
-        cols = ("symbol","score","pct","price_sats","vol_base_k")
+        cols = (
+            "symbol",
+            "score",
+            "pct",
+            "price_sats",
+            "spread_bps",
+            "buy_k",
+            "sell_k",
+            "imb",
+        )
         self.tree = ttk.Treeview(frm_mkt, columns=cols, show="headings")
         style = tb.Style(); style.configure("Treeview", font=("Consolas", 10))
-        headers = [("symbol","Símbolo",160,"w"),
-                   ("score","Score",70,"e"),
-                   ("pct","%24h",70,"e"),
-                   ("price_sats","Precio (sats)",120,"e"),
-                   ("vol_base_k","VolBase(k)",100,"e")]
+        self._sort_col: str | None = None
+        self._sort_reverse: bool = False
+        headers = [
+            ("symbol", "Símbolo", 160, "w"),
+            ("score", "Score", 70, "e"),
+            ("pct", "%24h", 70, "e"),
+            ("price_sats", "Precio (sats)", 120, "e"),
+            ("spread_bps", "Spread(bps)", 100, "e"),
+            ("buy_k", "Buy k", 80, "e"),
+            ("sell_k", "Sell k", 80, "e"),
+            ("imb", "Imb", 70, "e"),
+        ]
         for c, txt, w, an in headers:
-            self.tree.heading(c, text=txt); self.tree.column(c, width=w, anchor=an, stretch=False)
+            self.tree.heading(c, text=txt, command=lambda col=c: self._sort_tree(col, False))
+            self.tree.column(c, width=w, anchor=an, stretch=False)
         vsb = ttk.Scrollbar(frm_mkt, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=vsb.set)
         self.tree.grid(row=0, column=0, sticky="nsew"); vsb.grid(row=0, column=1, sticky="ns")
@@ -582,26 +635,9 @@ class App(tb.Window):
                 self.txt_info.insert("end", f"• {r}\n")
                 self.log_append(f"[ENGINE] {r}")
 
-        self.after(1000, self._tick_ui_refresh)
+        self.after(500, self._tick_ui_refresh)
 
     def _refresh_market_table(self, pairs: List[Dict[str, Any]], candidates: List[Dict[str, Any]]):
-        for i in self.tree.get_children():
-            self.tree.delete(i)
-        cand_syms = {c.get("symbol") for c in candidates}
-        for p in pairs:
-            sym = p.get("symbol", "")
-            display_sym = f"★ {sym}" if sym in cand_syms else sym
-            item = self.tree.insert(
-                "",
-                "end",
-                values=(
-                    display_sym,
-                    f"{p.get('score',0.0):.1f}",
-                    f"{p.get('pct_change_window',0.0):+.2f}",
-                    f"{(p.get('price_last',0.0)*1e8):.0f}",
-                    f"{(p.get('depth',{}).get('buy',0.0)+p.get('depth',{}).get('sell',0.0))/1000:.1f}",
-                ),
-            )
             try:
                 sc = float(p.get('score',0.0))
                 tag = 'scoreLow'
@@ -616,6 +652,10 @@ class App(tb.Window):
                 self.tree.item(item, tags=tuple(tags))
             except Exception:
                 pass
+        for iid in existing.values():
+            self.tree.delete(iid)
+        if self._sort_col:
+            self._sort_tree(self._sort_col, self._sort_reverse, preserve=True)
 
     def _refresh_open_orders(self, orders: List[Dict[str, Any]]):
         for i in self.tree_open.get_children():
