@@ -101,6 +101,8 @@ class BinanceWS:
                 ba = asks[0][0] if asks else 0.0
                 mid = (bb+ba)/2.0 if bb and ba else (bb or ba or 0.0)
                 volb = sum(q for _,q in bids[:5]); vola = sum(q for _,q in asks[:5])
+                top_bid_qty = bids[0][1] if bids else 0.0
+                top_ask_qty = asks[0][1] if asks else 0.0
                 spread = (ba-bb) if (bb and ba) else 0.0
                 imb = (volb/(volb+vola)) if (volb+vola)>0 else 0.5
                 tf_buy = float(flow.get("buy",0)); tf_sell = float(flow.get("sell",0))
@@ -109,6 +111,7 @@ class BinanceWS:
                     "best_bid": bb, "best_ask": ba, "mid": mid,
                     "spread_abs": spread, "spread_pct": (spread/mid*100.0) if mid else 0.0,
                     "depth_buy": volb, "depth_sell": vola, "imbalance": imb,
+                    "bid_top_qty": top_bid_qty, "ask_top_qty": top_ask_qty,
                     "trade_flow": {"buy_ratio": buy_ratio, "streak": int(flow.get("streak",0))},
                 }
         return out
@@ -207,6 +210,8 @@ class BinanceExchange:
             spread_abs = abs(ba - bb) if (bb and ba) else 0.0
             volb = (ws.get("depth_buy", 0.0) or 0.0); vola = (ws.get("depth_sell", 0.0) or 0.0)
             imb = (volb / (volb + vola)) if (volb + vola) > 0 else 0.5
+            topb = ws.get("bid_top_qty", 0.0)
+            topa = ws.get("ask_top_qty", 0.0)
 
             mkt = (self.exchange.markets or {}).get(sym, {})
             precision = (mkt.get("precision") or {}).get("price")
@@ -234,6 +239,7 @@ class BinanceExchange:
                 "pct_change_window": float(t.get("percentage") or 0.0) if t else 0.0,
                 "depth": {"buy": volb, "sell": vola},
                 "imbalance": imb,
+                "bid_top_qty": topb, "ask_top_qty": topa,
                 "trade_flow": ws.get("trade_flow", {"buy_ratio":0.5,"streak":0}),
                 "micro_volatility": (spread_abs / (mid or 1.0)) if mid else 0.0,
                 "tick_size": tick_size,
