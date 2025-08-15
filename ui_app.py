@@ -368,7 +368,11 @@ class App(tb.Window):
         if bool(self.var_use_min_live.get()):
             try:
                 min_usd = self.exchange.global_min_notional_usd()
+<<<<<< codex/fix-binance-minimum-order-and-api-calls-63gexs
                 usd = float(min_usd) + 0.01
+=======
+                usd = float(min_usd) + 0.1
+>>>>>> main
                 self._engine_live.cfg.size_usd_live = float(usd if usd > 0 else self._engine_live.cfg.size_usd_live)
                 self.var_size_live.set(round(self._engine_live.cfg.size_usd_live, 2))
                 self.ent_size_live.configure(state="disabled")
@@ -472,7 +476,11 @@ class App(tb.Window):
             try:
                 self._ensure_exchange()
                 min_usd = self.exchange.global_min_notional_usd()
+<<<<<< codex/fix-binance-minimum-order-and-api-calls-63gexs
                 usd = float(min_usd) + 0.01
+=======
+                usd = float(min_usd) + 0.1
+>>>>>> main
                 self.var_size_live.set(round(usd, 2))
                 if self._engine_live:
                     self._engine_live.cfg.size_usd_live = float(usd)
