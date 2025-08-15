@@ -6,6 +6,7 @@ from tkinter import ttk
 from typing import Dict, Any, List
 from config import UIColors, Defaults, AppState
 from engine import Engine
+from scoring import compute_score
 
 BADGE_SIM = "🔧SIM"
 BADGE_LIVE = "⚡LIVE"
@@ -642,8 +643,46 @@ class App(tb.Window):
             self.tree.set(iid, "symbol").replace("★ ", ""): iid
             for iid in self.tree.get_children()
         }
-        for p in pairs:
+        # sort pairs by score desc so best appear on top
+        pairs_sorted = sorted(pairs, key=lambda p: p.get("score", 0.0), reverse=True)
+        for p in pairs_sorted:
             sym = p.get("symbol", "")
+            # fetch order book to obtain quantities and imbalance if missing
+            try:
+                ob = self.exchange.exchange.fetch_order_book(sym, limit=5)
+                bids = ob.get("bids", [])
+                asks = ob.get("asks", [])
+                topb_qty = float(bids[0][1]) if bids else 0.0
+                topa_qty = float(asks[0][1]) if asks else 0.0
+                volb = sum(float(b[1]) for b in bids)
+                vola = sum(float(a[1]) for a in asks)
+                imb = volb / (volb + vola) if (volb + vola) > 0 else 0.5
+                p["bid_top_qty"] = topb_qty
+                p["ask_top_qty"] = topa_qty
+                p["imbalance"] = imb
+                p["depth_buy"] = volb
+                p["depth_sell"] = vola
+                p["best_bid"] = float(bids[0][0]) if bids else 0.0
+                p["best_ask"] = float(asks[0][0]) if asks else 0.0
+                p["spread_abs"] = p["best_ask"] - p["best_bid"] if bids and asks else p.get("spread_abs", 0.0)
+                if float(p.get("score", 0.0)) == 0.0:
+                    mid = (p["best_bid"] + p["best_ask"]) / 2.0 if bids and asks else p.get("mid", 0.0)
+                    features = {
+                        "pct_change_window": p.get("pct_change_window", 0.0),
+                        "depth_buy": volb,
+                        "depth_sell": vola,
+                        "best_bid_qty": topb_qty,
+                        "best_ask_qty": topa_qty,
+                        "spread_abs": p["spread_abs"],
+                        "mid": mid,
+                        "trade_flow_buy_ratio": 0.5,
+                        "micro_volatility": p.get("micro_volatility", 0.0),
+                        "weights": self.cfg.weights,
+                    }
+                    p["score"] = compute_score(features)
+            except Exception:
+                pass
+
             display_sym = f"★ {sym}" if sym in cand_syms else sym
             values = (
                 display_sym,
