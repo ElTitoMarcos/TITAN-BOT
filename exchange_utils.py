@@ -277,7 +277,32 @@ class BinanceExchange:
 
         Se añade un margen de 0.1 USDT para asegurar que las órdenes
         cumplen con el mínimo requerido por Binance."""
+<<<<<< codex/fix-minimum-allowed-amount-for-binance-v02fj6
+
+        default = 5.0
+        buffer = 0.1
+
+        # 1) Intentar obtener el mínimo global desde la información del exchange
+        try:
+            info = self.exchange.public_get_exchangeinfo()
+            for f in (info or {}).get("exchangeFilters", []):
+                if f.get("filterType") in ("MIN_NOTIONAL", "NOTIONAL"):
+                    v = float(f.get("minNotional") or f.get("notional") or 0.0)
+                    if v > 0:
+                        return float(v + buffer)
+        except Exception:
+            pass
+
+        # 2) Fallback: recorrer los mercados spot con quote estable
+        try:
+            self.load_markets()
+        except Exception:
+            # Si la carga de mercados falla devolvemos el fallback seguro
+            return float(default + buffer)
+
+=======
         self.load_markets()
+>>>>>> main
         min_usd = None
         for m in self.exchange.markets.values():
             try:
@@ -286,17 +311,26 @@ class BinanceExchange:
                 quote = (m.get("quote") or "").upper()
                 if quote not in ("USDT","TUSD","FDUSD","BUSD"): continue
                 lim = ((m.get("limits") or {}).get("cost") or {}).get("min", None)
-                if isinstance(lim, (int,float)) and lim and lim > 0:
+                if isinstance(lim, (int, float)) and lim and lim > 0:
                     val = float(lim)
                 else:
                     val = None
                     info = m.get("info") or {}
                     for f in info.get("filters", []):
-                        if f.get("filterType") in ("MIN_NOTIONAL","NOTIONAL"):
+                        if f.get("filterType") in ("MIN_NOTIONAL", "NOTIONAL"):
                             v = float(f.get("minNotional") or f.get("notional") or 0.0)
-                            if v > 0: val = v; break
-                if val is None: continue
+                            if v > 0:
+                                val = v
+                                break
+                if val is None or val < 4.0:
+                    # Ignorar valores anómalamente bajos
+                    continue
                 min_usd = val if (min_usd is None or val < min_usd) else min_usd
             except Exception:
                 continue
+<<<<<< codex/fix-minimum-allowed-amount-for-binance-v02fj6
+
+        return float((min_usd if min_usd is not None else default) + buffer)
+=======
         return float((min_usd if min_usd is not None else 5.0) + 0.1)
+>>>>>> main
