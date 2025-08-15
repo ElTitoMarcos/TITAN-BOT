@@ -296,6 +296,7 @@ class BinanceExchange:
         try:
             self.load_markets()
         except Exception:
+            # Si la carga de mercados falla devolvemos el fallback seguro
             return float(default + buffer)
 
         min_usd = None
