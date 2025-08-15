@@ -384,7 +384,8 @@ def _log_audit(self, event: str, sym: str, detail: str):
                 self._try_fill_sim_orders(snapshot)
 
                 open_count = len(snapshot.get("open_orders", []))
-                candidates = self._find_candidates(snapshot)(snapshot)
+                # Determina los pares candidatos usando el snapshot actual
+                candidates = self._find_candidates(snapshot)
 
                 do_call = False
                 if not self._first_call_done and ((snapshot.get('pairs') and len(snapshot.get('pairs'))>0) or open_count):
