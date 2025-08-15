@@ -123,6 +123,7 @@ class BinanceExchange:
     _cached_universe: Dict[str, List[str]] = {}
     _fee_cache: Dict[str, float] = {}
 
+
     def __init__(self, rate_limit=True, sandbox=False):
         self.exchange = ccxt.binance({
             "enableRateLimit": rate_limit,
@@ -232,6 +233,8 @@ class BinanceExchange:
                 except Exception:
                     pass
             imb = (volb / (volb + vola)) if (volb + vola) > 0 else 0.5
+            topb = ws.get("bid_top_qty", 0.0)
+            topa = ws.get("ask_top_qty", 0.0)
 
             mkt = (self.exchange.markets or {}).get(sym, {})
             precision = (mkt.get("precision") or {}).get("price")

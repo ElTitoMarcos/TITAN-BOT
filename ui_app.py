@@ -6,6 +6,7 @@ from tkinter import ttk
 from typing import Dict, Any, List
 from config import UIColors, Defaults, AppState
 from engine import Engine
+from scoring import compute_score
 
 BADGE_SIM = "🔧SIM"
 BADGE_LIVE = "⚡LIVE"
@@ -112,6 +113,7 @@ class App(tb.Window):
         self._lock_controls(True)
         self.after(250, self._poll_log_queue)
         self.after(4000, self._tick_ui_refresh)
+
         # Precarga de mercado y balance
         self._warmup_thread = threading.Thread(target=self._warmup_load_market, daemon=True)
         self._warmup_thread.start()
@@ -195,6 +197,7 @@ class App(tb.Window):
         self.tree.configure(yscrollcommand=vsb.set)
         self.tree.grid(row=0, column=0, sticky="nsew"); vsb.grid(row=0, column=1, sticky="ns")
         ttk.Label(frm_mkt, text="Imb: >0.5 compras dominan, <0.5 ventas").grid(row=1, column=0, columnspan=2, sticky="w", pady=(4,0))
+        
         # Colores por score (fino) en texto
         self.tree.tag_configure('score95', foreground='#166534')
         self.tree.tag_configure('score90', foreground='#15803d')
@@ -251,6 +254,7 @@ class App(tb.Window):
         right.rowconfigure(6, weight=0)
         right.rowconfigure(7, weight=0)
         right.rowconfigure(8, weight=1)
+
 
         ttk.Label(right, text="Ajustes").grid(row=0, column=0, sticky="w", pady=(0,6))
 
@@ -391,6 +395,7 @@ class App(tb.Window):
                 self.exchange.fetch_universe("USDT") +
                 self.exchange.fetch_universe("BTC")
             ))[:100]
+
             if uni:
                 pairs = self.exchange.fetch_top_metrics(uni[: min(20, len(uni))])
                 if not self._snapshot:
@@ -411,6 +416,7 @@ class App(tb.Window):
                 self.exchange.fetch_universe("USDT") +
                 self.exchange.fetch_universe("BTC")
             ))[:100]
+
             if not uni:
                 return
             pairs = self.exchange.fetch_top_metrics(uni[: min(20, len(uni))])
