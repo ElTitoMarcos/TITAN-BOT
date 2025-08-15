@@ -36,21 +36,22 @@ class App(tb.Window):
             # re-enable API widgets
             key_name = str(self.var_bin_key) if hasattr(self, "var_bin_key") else None
             sec_name = str(self.var_bin_sec) if hasattr(self, "var_bin_sec") else None
+            oai_name = str(self.var_oai_key) if hasattr(self, "var_oai_key") else None
             for w in self._iter_all_widgets():
                 try:
-                    if w.winfo_class() in ("TEntry","Entry"):
+                    if w.winfo_class() in ("TEntry", "Entry"):
                         tv = w.cget("textvariable") if "textvariable" in w.keys() else ""
-                        if tv in (key_name, sec_name):
+                        if tv in (key_name, sec_name, oai_name):
                             w.configure(state="normal")
-                    if w.winfo_class() in ("TButton","Button"):
+                    if w.winfo_class() in ("TButton", "Button"):
                         txt = w.cget("text") if "text" in w.keys() else ""
-                        if "Aplicar Binance" in str(txt):
+                        if "Confirmar APIs" in str(txt):
                             w.configure(state="normal")
                 except Exception:
                     pass
         except Exception:
             pass
-    
+
     def __init__(self):
         super().__init__(title="AutoBTC - Punto a Punto", themename="cyborg")
         self.geometry("1400x860")
@@ -66,6 +67,7 @@ class App(tb.Window):
         self.exchange = None
 
         self._build_ui()
+        self._lock_controls(True)
         self.after(250, self._poll_log_queue)
         self.after(800, self._tick_ui_refresh)
         # Precarga de mercado y balance
@@ -81,10 +83,8 @@ class App(tb.Window):
         self.rowconfigure(1, weight=1)
         try:
             self._ensure_exchange()
-            if not self.exchange.is_live_ready():
-                self._lock_controls(True)
         except Exception:
-            self._lock_controls(True)
+            pass
 
         # Header
         header = ttk.Frame(self, padding=10)
@@ -214,12 +214,11 @@ class App(tb.Window):
         ttk.Entry(frm_api, textvariable=self.var_bin_key, width=28).grid(row=0, column=1, sticky="e")
         ttk.Label(frm_api, text="Binance SECRET").grid(row=1, column=0, sticky="w")
         ttk.Entry(frm_api, textvariable=self.var_bin_sec, width=28, show="•").grid(row=1, column=1, sticky="e")
-        ttk.Button(frm_api, text="Aplicar Binance", command=self._apply_binance_keys).grid(row=0, column=2, rowspan=2, padx=6)
 
         self.var_oai_key = tb.StringVar(value="")
         ttk.Label(frm_api, text="ChatGPT API Key").grid(row=2, column=0, sticky="w")
         ttk.Entry(frm_api, textvariable=self.var_oai_key, width=28, show="•").grid(row=2, column=1, sticky="e")
-        ttk.Button(frm_api, text="Aplicar ChatGPT", command=self._apply_openai_key).grid(row=2, column=2, padx=6)
+        ttk.Button(frm_api, text="Confirmar APIs", command=self._confirm_apis).grid(row=0, column=2, rowspan=3, padx=6)
 
         # LLM config minimal: model + seconds + apply button
         frm_llm = ttk.Labelframe(right, text="LLM (decisor)", padding=8)
@@ -379,24 +378,48 @@ class App(tb.Window):
         sec = self.var_bin_sec.get().strip()
         self._ensure_exchange()
         self.exchange.set_api_keys(key, sec)
-        if self._engine_sim: self._engine_sim.exchange.set_api_keys(key, sec)
-        if self._engine_live: self._engine_live.exchange.set_api_keys(key, sec)
+        if self._engine_sim:
+            self._engine_sim.exchange.set_api_keys(key, sec)
+        if self._engine_live:
+            self._engine_live.exchange.set_api_keys(key, sec)
         self.log_append("[ENGINE] Claves de Binance aplicadas.")
         try:
-            # prueba carga y desbloquea
-            self.exchange.load_markets(); self._lock_controls(False)
+            self.exchange.load_markets()
+            return True
         except Exception:
-            pass
+            return False
 
     def _apply_openai_key(self):
         k = self.var_oai_key.get().strip()
+        client = None
         if self._engine_sim:
             self._engine_sim.llm.set_api_key(k)
             self._engine_sim.cfg.openai_api_key = k
+            client = self._engine_sim.llm
         if self._engine_live:
             self._engine_live.llm.set_api_key(k)
             self._engine_live.cfg.openai_api_key = k
+            client = client or self._engine_live.llm
+        if client is None:
+            from llm_client import LLMClient
+            client = LLMClient(api_key=k)
         self.log_append("[LLM] Clave de ChatGPT aplicada.")
+        try:
+            if client._openai:
+                client._openai.models.list()
+                return True
+        except Exception:
+            pass
+        return False
+
+    def _confirm_apis(self):
+        ok_bin = self._apply_binance_keys()
+        ok_oai = self._apply_openai_key()
+        if ok_bin and ok_oai:
+            self._lock_controls(False)
+            self.log_append("[APP] APIs verificadas. Desbloqueando interfaz.")
+        else:
+            self.log_append("[APP] Error verificando APIs. Revísalas e intenta nuevamente.")
 
     def _apply_llm(self):
         if self._engine_sim:
