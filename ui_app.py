@@ -202,6 +202,7 @@ class App(tb.Window):
         self.tree.tag_configure('score40', foreground='#f97316')
         self.tree.tag_configure('score30', foreground='#f43f5e')
         self.tree.tag_configure('scoreLow', foreground='#b91c1c')
+
         self.tree.tag_configure('veto', background='#ef4444', foreground='white')
         self.tree.tag_configure('candidate', font=('Consolas', 10, 'bold'))
 
@@ -692,7 +693,6 @@ class App(tb.Window):
                     p["score"] = compute_score(features)
             except Exception:
                 pass
-
             values = (
                 sym,
                 f"{p.get('score',0.0):.1f}",
