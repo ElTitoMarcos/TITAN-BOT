@@ -37,14 +37,23 @@ class LLMClient:
 
     def propose_actions(self, snapshot: Dict[str, Any]) -> Dict[str, Any]:
         # Intenta OpenAI primero, si no heurístico
+        result: Dict[str, Any] = {}
         if self._openai:
             try:
-                return self._propose_openai(snapshot)
+                result = self._propose_openai(snapshot)
             except Exception:
-                pass
-        return self._propose_dummy(snapshot)
+                result = {}
+        if not result:
+            result = self._propose_dummy(snapshot)
+        try:
+            from data_logger import log_event
+            log_event({"llm": {"request": snapshot, "response": result}})
+        except Exception:
+            pass
+        return result
 
     def greet(self, message: str = "hola") -> str:
+        reply = ""
         if self._openai:
             try:
                 resp = self._openai.chat.completions.create(
@@ -53,10 +62,35 @@ class LLMClient:
                     temperature=self.temp_op,
                     timeout=20,
                 )
-                return resp.choices[0].message.content or ""
+                reply = resp.choices[0].message.content or ""
             except Exception:
-                return ""
-        return ""
+                reply = ""
+        try:
+            from data_logger import log_event
+            log_event({"llm": {"request": message, "response": reply}})
+        except Exception:
+            pass
+        return reply
+
+    def ask(self, message: str) -> str:
+        reply = ""
+        if self._openai:
+            try:
+                resp = self._openai.chat.completions.create(
+                    model=self.model,
+                    messages=[{"role": "user", "content": message}],
+                    temperature=self.temp_ana,
+                    timeout=20,
+                )
+                reply = resp.choices[0].message.content or ""
+            except Exception:
+                reply = ""
+        try:
+            from data_logger import log_event
+            log_event({"llm": {"request": message, "response": reply}})
+        except Exception:
+            pass
+        return reply
 
     def ask(self, message: str) -> str:
         if self._openai:

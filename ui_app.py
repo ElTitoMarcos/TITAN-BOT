@@ -390,7 +390,7 @@ class App(tb.Window):
     def _warmup_load_market(self):
         try:
             self._ensure_exchange()
-            uni = self.exchange.fetch_universe(None)[:100]
+            uni = [s for s in self.exchange.fetch_universe("BTC") if s.endswith("/BTC")][:100]
 
             if uni:
                 pairs = self.exchange.fetch_top_metrics(uni[: min(20, len(uni))])
@@ -445,7 +445,7 @@ class App(tb.Window):
     def _refresh_market_candidates(self):
         try:
             self._ensure_exchange()
-            uni = self.exchange.fetch_universe(None)[:100]
+            uni = [s for s in self.exchange.fetch_universe("BTC") if s.endswith("/BTC")][:100]
 
             if not uni:
                 return

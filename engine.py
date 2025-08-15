@@ -175,7 +175,7 @@ class Engine(threading.Thread):
         return cands
 
     def build_snapshot(self) -> Dict[str, Any]:
-        universe = self.exchange.fetch_universe("BTC")
+        universe = [s for s in self.exchange.fetch_universe("BTC") if s.endswith("/BTC")]
         universe = list(dict.fromkeys(universe))[:200]
         pairs = self.exchange.fetch_top_metrics(universe)
         try:
@@ -457,6 +457,7 @@ def _log_audit(self, event: str, sym: str, detail: str):
                 snapshot = self.build_snapshot()
                 self.ui_push_snapshot(snapshot)
                 self._try_fill_sim_orders(snapshot)
+                self._save_snapshot_jsonl(snapshot)
 
                 open_count = len(snapshot.get("open_orders", []))
                 candidates = snapshot.get("candidates", [])
@@ -542,11 +543,8 @@ def _log_audit(self, event: str, sym: str, detail: str):
 
     def _save_snapshot_jsonl(self, snapshot: dict):
         try:
-            import json, time, os
-            d = self._ensure_logs_dir()
-            path = os.path.join(d, "snapshots.jsonl")
-            with open(path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(snapshot, ensure_ascii=False) + "\n")
+            from data_logger import log_event
+            log_event({"snapshot": snapshot})
         except Exception:
             pass
 

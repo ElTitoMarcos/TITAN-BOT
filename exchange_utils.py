@@ -177,7 +177,42 @@ class BinanceExchange:
             return 0.0
 
     def market_summary_for(self, symbols: List[str]) -> Dict[str, Dict[str, Any]]:
-        return self.ws.snapshot_for(symbols)
+        snap = self.ws.snapshot_for(symbols)
+        out: Dict[str, Dict[str, Any]] = {}
+        for sym in symbols:
+            data = dict((snap or {}).get(sym, {}))
+            if not data.get("depth_buy") or not data.get("depth_sell"):
+                bids, asks = self._safe_order_book(sym)
+                if bids:
+                    data["best_bid"] = float(bids[0][0])
+                    data["bid_top_qty"] = float(bids[0][1])
+                    data["depth_buy"] = sum(float(q) for _, q in bids[:5])
+                if asks:
+                    data["best_ask"] = float(asks[0][0])
+                    data["ask_top_qty"] = float(asks[0][1])
+                    data["depth_sell"] = sum(float(q) for _, q in asks[:5])
+                bb = data.get("best_bid", 0.0)
+                ba = data.get("best_ask", 0.0)
+                if bb and ba:
+                    spread = abs(ba - bb)
+                    mid = (bb + ba) / 2.0
+                    data["spread_abs"] = spread
+                    data["mid"] = mid
+                    data["spread_pct"] = (spread / mid * 100.0) if mid else 0.0
+                    topb = data.get("bid_top_qty", 0.0)
+                    topa = data.get("ask_top_qty", 0.0)
+                    data["imbalance"] = (topb / (topb + topa)) if (topb + topa) > 0 else 0.5
+            out[sym] = data
+        return out
+
+    def _safe_order_book(self, sym: str):
+        try:
+            ob = self.exchange.fetch_order_book(sym, limit=5)
+            bids = ob.get("bids", [])
+            asks = ob.get("asks", [])
+        except Exception:
+            bids, asks = [], []
+        return bids, asks
 
     def _safe_order_book(self, sym: str):
         try:
