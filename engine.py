@@ -126,8 +126,9 @@ class Engine(threading.Thread):
         cands: List[Dict[str, Any]] = []
         for p in snapshot.get("pairs", []):
             mid = float(p.get("mid") or p.get("price_last") or 0.0)
-            tick_pct = (1e-8 / mid * 100.0) if mid else 0.0
-            p["tick_pct_sat"] = tick_pct
+            tick_sz = float(p.get("tick_size") or 1e-8)
+            tick_pct = (tick_sz / mid * 100.0) if mid else 0.0
+            p["tick_pct"] = tick_pct
             if tick_pct > thr_pct:
                 cands.append(p)
         return cands
@@ -406,6 +407,12 @@ def _log_audit(self, event: str, sym: str, detail: str):
 
                 actions: List[Dict[str, Any]] = []
                 if do_call:
+                    try:
+                        greet_msg = self.llm.greet("hola")
+                        if greet_msg:
+                            self.ui_log(f"[LLM] {greet_msg}")
+                    except Exception:
+                        pass
                     llm_out = self.llm.propose_actions({
                         **snapshot,
                         "config": {**snapshot["config"], "max_actions_per_cycle": self.cfg.llm_max_actions_per_cycle},

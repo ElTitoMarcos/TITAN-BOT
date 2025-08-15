@@ -207,6 +207,24 @@ class BinanceExchange:
             spread_abs = abs(ba - bb) if (bb and ba) else 0.0
             volb = (ws.get("depth_buy", 0.0) or 0.0); vola = (ws.get("depth_sell", 0.0) or 0.0)
             imb = (volb / (volb + vola)) if (volb + vola) > 0 else 0.5
+
+            mkt = (self.exchange.markets or {}).get(sym, {})
+            precision = (mkt.get("precision") or {}).get("price")
+            tick_size = None
+            if precision is not None:
+                try:
+                    tick_size = 10 ** (-int(precision))
+                except Exception:
+                    tick_size = None
+            if tick_size is None:
+                info = mkt.get("info") or {}
+                for f in info.get("filters", []):
+                    if f.get("filterType") == "PRICE_FILTER":
+                        ts = float(f.get("tickSize") or 0.0)
+                        if ts > 0:
+                            tick_size = ts
+                            break
+            tick_size = tick_size or 1e-8
             out.append({
                 "symbol": sym,
                 "price_last": last or mid or 0.0,
@@ -218,6 +236,7 @@ class BinanceExchange:
                 "imbalance": imb,
                 "trade_flow": ws.get("trade_flow", {"buy_ratio":0.5,"streak":0}),
                 "micro_volatility": (spread_abs / (mid or 1.0)) if mid else 0.0,
+                "tick_size": tick_size,
                 "edge_est_bps": 0.0,
                 "score": 0.0,
             })
@@ -275,10 +294,10 @@ class BinanceExchange:
     def global_min_notional_usd(self) -> float:
         """Devuelve el mínimo notional (USDT) más bajo que exige Binance entre mercados spot activos con quote estable.
 
-        Se añade un margen de 0.1 USDT para asegurar que las órdenes
+        Se añade un margen de 0.01 USDT para asegurar que las órdenes
         cumplen con el mínimo requerido por Binance."""
         default = 5.0
-        buffer = 0.1
+        buffer = 0.01
 
         # 1) Intentar obtener el mínimo global desde la información del exchange
         try:

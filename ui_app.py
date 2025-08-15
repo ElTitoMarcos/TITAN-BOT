@@ -504,7 +504,7 @@ class App(tb.Window):
         self.lbl_ws.configure(text=f"WS: {gs.get('latency_ws_ms',0):.0f} ms")
 
         # Tablas
-        self._refresh_market_table(snap.get("pairs", []))
+        self._refresh_market_table(snap.get("candidates") or snap.get("pairs", []))
         self._refresh_open_orders(snap.get("open_orders", []))
         self._refresh_closed_orders(snap.get("closed_orders", []))
 

@@ -44,6 +44,20 @@ class LLMClient:
                 pass
         return self._propose_dummy(snapshot)
 
+    def greet(self, message: str = "hola") -> str:
+        if self._openai:
+            try:
+                resp = self._openai.chat.completions.create(
+                    model=self.model,
+                    messages=[{"role": "user", "content": message}],
+                    temperature=self.temp_op,
+                    timeout=20,
+                )
+                return resp.choices[0].message.content or ""
+            except Exception:
+                return ""
+        return ""
+
     # -------------------- OpenAI --------------------
     def _propose_openai(self, snapshot: Dict[str, Any]) -> Dict[str, Any]:
         client = self._openai
