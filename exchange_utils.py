@@ -172,6 +172,15 @@ class BinanceExchange:
     def market_summary_for(self, symbols: List[str]) -> Dict[str, Dict[str, Any]]:
         return self.ws.snapshot_for(symbols)
 
+    def _safe_order_book(self, sym: str):
+        try:
+            ob = self.exchange.fetch_order_book(sym, limit=5)
+            bids = ob.get("bids", [])
+            asks = ob.get("asks", [])
+        except Exception:
+            bids, asks = [], []
+        return bids, asks
+
     # ---------- Universe + metrics ----------
     def fetch_universe(self, quote: Optional[str] = "BTC") -> List[str]:
         key = (quote or "ALL").upper()
@@ -216,6 +225,20 @@ class BinanceExchange:
             spread_abs = abs(ba - bb) if (bb and ba) else 0.0
             volb = ws.get("depth_buy", 0.0) or 0.0
             vola = ws.get("depth_sell", 0.0) or 0.0
+            topb = ws.get("bid_top_qty", 0.0)
+            topa = ws.get("ask_top_qty", 0.0)
+            if (topb == 0.0 or topa == 0.0) or (volb == 0.0 or vola == 0.0):
+                bids, asks = self._safe_order_book(sym)
+                if bids:
+                    bb = float(bids[0][0])
+                    topb = float(bids[0][1])
+                    volb = sum(float(q) for _, q in bids[:5])
+                if asks:
+                    ba = float(asks[0][0])
+                    topa = float(asks[0][1])
+                    vola = sum(float(q) for _, q in asks[:5])
+                spread_abs = abs(ba - bb) if (bb and ba) else spread_abs
+            imb = (topb / (topb + topa)) if (topb + topa) > 0 else 0.5
 
             topb = ws.get("bid_top_qty", 0.0)
             topa = ws.get("ask_top_qty", 0.0)
