@@ -22,7 +22,6 @@ class Defaults:
     size_usd_live: float = 50.0
 
     # LLM / engine
-    llm_call_interval_ms: int = 120000
     llm_timeout_ms: int = 1500
     llm_max_actions_per_cycle: int = 6
     llm_model: str = "gpt-4o"
