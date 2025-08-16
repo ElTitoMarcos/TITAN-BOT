@@ -8,6 +8,8 @@ import time
 from datetime import datetime
 from typing import Callable, Dict, List, Optional, Tuple
 
+from llm import LLMClient
+
 from .models import BotConfig, BotStats, SupervisorEvent
 from .storage import InMemoryStorage
 
@@ -95,19 +97,27 @@ class Supervisor:
         """Ejecuta un ciclo completo simulando bots."""
         # Generar bots si es la primera vez
         if not self._current_generation:
-            self._current_generation = [
-                BotConfig(
+            variations: List[Dict[str, object]] = []
+            if cycle == 1:
+                try:
+                    client = LLMClient()
+                    variations = client.generate_initial_variations("")
+                except Exception:
+                    variations = []
+
+            self._current_generation = []
+            for i in range(self._num_bots):
+                var = variations[i] if i < len(variations) else {"name": f"Bot-{self._next_bot_id + i}", "mutations": {}}
+                cfg = BotConfig(
                     id=self._next_bot_id + i,
                     cycle=cycle,
-                    name=f"Bot-{self._next_bot_id + i}",
-                    mutations={},
+                    name=str(var.get("name", f"Bot-{self._next_bot_id + i}")),
+                    mutations=var.get("mutations", {}),
                     seed_parent=None,
                 )
-                for i in range(self._num_bots)
-            ]
-            self._next_bot_id += self._num_bots
-            for cfg in self._current_generation:
                 self.storage.save_bot(cfg)
+                self._current_generation.append(cfg)
+            self._next_bot_id += self._num_bots
         else:
             # actualizar ciclo en configs existentes
             for cfg in self._current_generation:
