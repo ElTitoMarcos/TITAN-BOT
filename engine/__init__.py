@@ -5,7 +5,7 @@ from typing import Any, Callable, Dict, Optional
 
 from .legacy import Engine
 from .strategy_base import StrategyBase
-from .strategy_params import map_mutations
+from .strategy_params import map_mutations_to_params
 
 
 def create_engine(
@@ -14,21 +14,8 @@ def create_engine(
     mutations: Optional[Dict[str, Any]] = None,
     on_order: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> Engine:
-    """Instantiate :class:`Engine` applying overrides and hooks.
+    """Instantiate :class:`Engine` applying overrides and hooks."""
 
-    Parameters
-    ----------
-    exchange: object, optional
-        Exchange implementation to use. If ``None`` a default Binance
-        exchange is created by :class:`Engine`.
-    config_overrides: dict, optional
-        Values to override in the engine configuration.
-    mutations: dict, optional
-        Strategy mutations to store in the engine instance for external
-        introspection.
-    on_order: callable, optional
-        Callback invoked when the engine places or fills an order.
-    """
     engine = Engine(ui_push_snapshot=lambda _: None, exchange=exchange)
     if config_overrides:
         for key, value in config_overrides.items():
@@ -40,7 +27,15 @@ def create_engine(
 
 def load_sim_config(mutations: Dict[str, Any]) -> Engine:
     """Create a SIM engine applying strategy mutations."""
-    params = map_mutations(mutations)
-    return create_engine(config_overrides=params, mutations=mutations)
+    params = map_mutations_to_params(mutations)
+    overrides = {k: getattr(params, k) for k in ("order_size_usd",)}
+    return create_engine(config_overrides=overrides, mutations=mutations)
 
-__all__ = ["Engine", "StrategyBase", "map_mutations", "create_engine", "load_sim_config"]
+
+__all__ = [
+    "Engine",
+    "StrategyBase",
+    "map_mutations_to_params",
+    "create_engine",
+    "load_sim_config",
+]

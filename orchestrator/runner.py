@@ -8,7 +8,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .models import BotConfig, BotStats
 from engine.strategy_base import StrategyBase
-from engine.strategy_params import map_mutations
+from engine.strategy_params import map_mutations_to_params, Params
 
 
 class BotRunner:
@@ -32,7 +32,7 @@ class BotRunner:
 
     async def run(self) -> BotStats:
         """Execute the bot respecting the provided limits."""
-        params = map_mutations(self.config.mutations)
+        params: Params = map_mutations_to_params(self.config.mutations)
         start = time.time()
         orders_count = 0
         wins = 0
@@ -78,7 +78,7 @@ class BotRunner:
                     "raw_json": json.dumps(sell),
                 }
             )
-
+            
             open_orders.append((buy, sell))
             orders_count += 2
 
@@ -106,11 +106,11 @@ class BotRunner:
                     "raw_json": json.dumps(order),
                 }
                 self.storage.save_order(data)
-
             self.ui_callback({"bot_id": self.config.id, **upd})
 
         runtime_s = int(time.time() - start)
-        notional = params.get("trade_size", 0.0) * (orders_count / 2)
+        notional = params.order_size_usd * (orders_count / 2)
+
         pnl_pct = (pnl / notional * 100.0) if notional else 0.0
 
         stats = BotStats(
