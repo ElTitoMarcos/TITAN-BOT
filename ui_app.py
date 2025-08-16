@@ -123,7 +123,6 @@ class App(tb.Window):
         self.exchange = None
         self._tester: TestManager | None = None
         self.var_min_orders = tb.IntVar(value=50)
-
         self.metric_defaults = dict(self.cfg.weights)
         self.metric_vars: Dict[str, tb.BooleanVar] = {}
 
