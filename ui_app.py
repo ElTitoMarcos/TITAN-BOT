@@ -1,4 +1,4 @@
-import threading, queue, time, json, os
+import threading, queue, time, json, os, copy
 import ttkbootstrap as tb
 from ttkbootstrap.constants import *
 from ttkbootstrap.scrolled import ScrolledText
@@ -8,6 +8,7 @@ from config import UIColors, Defaults, AppState
 from engine import Engine
 from scoring import compute_score
 from test_manager import TestManager
+from llm_client import LLMClient
 
 BADGE_SIM = "🔧SIM"
 BADGE_LIVE = "⚡LIVE"
@@ -106,8 +107,6 @@ class App(tb.Window):
         self.exchange = None
         self._tester: TestManager | None = None
         self.var_min_orders = tb.IntVar(value=50)
-        self._auto_started_sim = False
-
         self.metric_defaults = dict(self.cfg.weights)
         self.metric_vars: Dict[str, tb.BooleanVar] = {}
 
@@ -557,6 +556,7 @@ class App(tb.Window):
         self._ensure_exchange()
         self._engine_sim = Engine(ui_push_snapshot=push_snapshot, ui_log=self.log_append, exchange=self.exchange, name="SIM")
         self._engine_sim.mode = "SIM"
+        self._engine_sim.cfg = copy.deepcopy(self.cfg)
         self._engine_sim.cfg.size_usd_sim = float(self.var_size_sim.get())
         # LLM
         self._engine_sim.llm.set_model(self.var_llm_model.get())
@@ -692,24 +692,9 @@ class App(tb.Window):
             self._tester = None
             self.btn_tests.configure(text="Iniciar Testeos")
             self.log_append("[TEST] Ciclo de testeo detenido")
-            if self._auto_started_sim and self._engine_sim:
-                self._engine_sim.stop()
-                self._engine_sim = None
-                self.var_bot_sim.set(False)
-                self.lbl_state_sim.configure(text="SIM: OFF", bootstyle=SECONDARY)
-                self.log_append("[ENGINE SIM] Bot SIM detenido.")
             return
-        if not self._engine_sim or not self._engine_sim.is_alive():
-            self._auto_started_sim = True
-            self._start_engine_sim()
-            self.var_bot_sim.set(True)
-            self.lbl_state_sim.configure(text="SIM: ON", bootstyle=SUCCESS)
-            self.log_append("[ENGINE SIM] Bot SIM iniciado automáticamente para tests.")
-        else:
-            self._auto_started_sim = False
-        if self._tester and self._tester.is_alive():
-            self.log_append("[TEST] Ciclo de testeo ya en ejecución")
-            return
+        if self._tester and not self._tester.is_alive():
+            self._tester = None
         def info(msg: str):
             def upd():
                 self.txt_info.insert("end", msg + "\n")
@@ -717,20 +702,36 @@ class App(tb.Window):
             self.after(0, upd)
         self.txt_info.delete("1.0", "end")
         min_orders = max(1, int(self.var_min_orders.get()))
-        self._tester = TestManager(self._engine_sim.cfg, self._engine_sim.llm, self.log_append, info, min_orders=min_orders)
+        llm = self._engine_sim.llm if self._engine_sim else LLMClient(model=self.var_llm_model.get(), api_key=self.var_oai_key.get())
+        self._tester = TestManager(copy.deepcopy(self.cfg), llm, self.log_append, info, min_orders=min_orders)
         self._tester.start()
         self.btn_tests.configure(text="Detener Testeos")
         self.log_append("[TEST] Ciclo de testeo iniciado")
+        self.after(500, self._check_tester_done)
+
+    def _check_tester_done(self):
+        if self._tester and self._tester.is_alive():
+            self.after(500, self._check_tester_done)
+            return
+        if not self._tester:
+            return
+        if self._engine_sim and self._tester.winner_cfg:
+            self._engine_sim.cfg = copy.deepcopy(self._tester.winner_cfg)
+            self.cfg = copy.deepcopy(self._tester.winner_cfg)
+            self.log_append("[TEST] Config ganadora aplicada al bot SIM.")
+        self.btn_tests.configure(text="Iniciar Testeos")
+        self.log_append("[TEST] Ciclo de testeo finalizado")
+        self._tester = None
 
     def _apply_winner_live(self):
-        if not self._tester or self._tester.winner_thr is None:
+        if not self._tester or not self._tester.winner_cfg:
             self.log_append("[TEST] No hay versión ganadora disponible")
             return
         if not self._engine_live:
             self.log_append("[TEST] Motor LIVE no iniciado")
             return
-        self._engine_live.cfg.opportunity_threshold_percent = self._tester.winner_thr
-        self.log_append(f"[TEST] Umbral LIVE actualizado a {self._tester.winner_thr:.4f}")
+        self._engine_live.cfg = copy.deepcopy(self._tester.winner_cfg)
+        self.log_append("[TEST] Config LIVE actualizada con variante ganadora")
 
     def _send_llm_query(self):
         q = self.var_llm_query.get().strip()
