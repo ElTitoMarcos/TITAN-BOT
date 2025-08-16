@@ -115,6 +115,35 @@ class SQLiteStorage:
             seed_parent=row["seed_parent"],
         )
 
+    def iter_bots(self) -> List[BotConfig]:
+        """Return all stored bot configurations."""
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT bot_id, cycle_id, name, seed_parent, mutations_json FROM bots"
+            ).fetchall()
+        bots: List[BotConfig] = []
+        for r in rows:
+            bots.append(
+                BotConfig(
+                    id=r["bot_id"],
+                    cycle=r["cycle_id"],
+                    name=r["name"],
+                    mutations=json.loads(r["mutations_json"]) if r["mutations_json"] else {},
+                    seed_parent=r["seed_parent"],
+                )
+            )
+        return bots
+
+    def get_cycle_winner(self, cycle_id: int) -> Optional[int]:
+        """Return winner bot id for a given cycle if stored."""
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT winner_bot_id FROM cycles WHERE cycle_id = ?", (cycle_id,)
+            ).fetchone()
+        if row is None:
+            return None
+        return row["winner_bot_id"] if row["winner_bot_id"] is not None else None
+
     # ------------------------------------------------------------------
     # Bot stats
     def save_bot_stats(self, stats: BotStats) -> None:
@@ -157,7 +186,6 @@ class SQLiteStorage:
         query += " ORDER BY cycle_id DESC LIMIT 1"
         with self._lock:
             row = self.conn.execute(query, params).fetchone()
-
         if row is None:
             return None
         return BotStats(

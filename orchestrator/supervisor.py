@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import hashlib
 import random
 import threading
 import time
@@ -120,10 +122,20 @@ class Supervisor:
         # Generar bots si es la primera vez
         if not self._current_generation:
             variations: List[Dict[str, object]] = []
+            client = LLMClient()
             if cycle == 1:
                 try:
-                    client = LLMClient()
                     variations = client.generate_initial_variations("")
+                except Exception:
+                    variations = []
+            else:
+                # generar a partir del ganador del ciclo previo
+                try:
+                    prev_winner_id = self.storage.get_cycle_winner(cycle - 1)
+                    winner_cfg = self.storage.get_bot(prev_winner_id) if prev_winner_id else None
+                    history = [self._fingerprint(b.mutations) for b in self.storage.iter_bots()]
+                    if winner_cfg:
+                        variations = client.new_generation_from_winner(winner_cfg.mutations, history)
                 except Exception:
                     variations = []
 
@@ -234,20 +246,43 @@ class Supervisor:
         return winner.bot_id, cfg
 
     def spawn_next_generation_from_winner(self, winner_config: BotConfig) -> List[BotConfig]:
-        """Genera nuevas configuraciones basadas en el ganador."""
+        """Genera nuevas configuraciones basadas en el ganador previo."""
+
         next_cycle = winner_config.cycle + 1
+        client = LLMClient()
+        # fingerprints históricos para evitar duplicados
+        history = [self._fingerprint(b.mutations) for b in self.storage.iter_bots()]
+        try:
+            variations = client.new_generation_from_winner(winner_config.mutations, history)
+        except Exception:
+            variations = []
+
         new_generation: List[BotConfig] = []
-        for _ in range(self._num_bots):
+        seen = set(history)
+        for i in range(self._num_bots):
+            var = variations[i] if i < len(variations) else {"name": f"Bot-{self._next_bot_id}", "mutations": {}}
+            muts = var.get("mutations", {})
+            fp = self._fingerprint(muts)
+            if fp in seen:
+                # evitar duplicado generando uno aleatorio simple
+                muts = {"seed": random.random()}
+                fp = self._fingerprint(muts)
+            seen.add(fp)
             bot_id = self._next_bot_id
             self._next_bot_id += 1
             cfg = BotConfig(
                 id=bot_id,
                 cycle=next_cycle,
-                name=f"Bot-{bot_id}",
-                mutations={"mut": random.random()},
+                name=str(var.get("name", f"Bot-{bot_id}")),
+                mutations=muts,
                 seed_parent=winner_config.name,
             )
             self.storage.save_bot(cfg)
             new_generation.append(cfg)
         self._current_generation = new_generation
         return new_generation
+
+    # ------------------------------------------------------------------
+    def _fingerprint(self, mutations: Dict[str, object]) -> str:
+        """Crea un hash de los parámetros para evitar duplicados."""
+        return hashlib.sha256(json.dumps(mutations, sort_keys=True).encode()).hexdigest()

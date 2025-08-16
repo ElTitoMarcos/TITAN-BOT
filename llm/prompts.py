@@ -35,3 +35,14 @@ Tarea: Elige UN ganador priorizando PNL y estabilidad (menor varianza y menos ti
 { "winner_bot_id": <int>, "reason": "<breve explicación>" }
 El JSON debe ser parseable. Nada más.
 """
+
+PROMPT_NUEVA_GENERACION_DESDE_GANADOR = """
+Base (JSON mutations) del bot ganador:
+<PEGAR_JSON_WINNER>
+Genera 10 NUEVAS variaciones cercanas (mutaciones locales pequeñas), todas distintas entre sí y distintas a cualquier variación previa (te paso fingerprints si los hay). Respeta:
+- Sin ML.
+- Par BTC.
+- Regla central de venta +1 tick puede extenderse a +k_ticks con max_wait_s, siempre cubriendo comisiones.
+Formato: igual que el prompt inicial (name + mutations). Devuelve JSON parseable.
+Evita duplicados: usa fingerprints (hashes) de conjuntos de parámetros que te paso.
+"""

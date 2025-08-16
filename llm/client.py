@@ -4,7 +4,13 @@ from __future__ import annotations
 import json
 import os
 from typing import Dict, List, Optional
-from .prompts import PROMPT_INICIAL_VARIACIONES, PROMPT_ANALISIS_CICLO
+import hashlib
+
+from .prompts import (
+    PROMPT_INICIAL_VARIACIONES,
+    PROMPT_ANALISIS_CICLO,
+    PROMPT_NUEVA_GENERACION_DESDE_GANADOR,
+)
 
 class LLMClient:
     """Wrapper liviano sobre OpenAI que genera variaciones iniciales.
@@ -112,6 +118,113 @@ class LLMClient:
         return unique
 
     # ------------------------------------------------------------------
+    def _fingerprint(self, mutations: Dict[str, object]) -> str:
+        """Genera un hash determinista para un conjunto de mutations."""
+        return hashlib.sha256(json.dumps(mutations, sort_keys=True).encode()).hexdigest()
+
+    # ------------------------------------------------------------------
+    def _fallback_new_generation(
+        self,
+        winner_mutations: Dict[str, object],
+        history_fingerprints: List[str],
+    ) -> List[Dict[str, object]]:
+        """Crea 10 variaciones simples basadas en el ganador.
+
+        Cada variación modifica ligeramente ``imbalance_buy_threshold_pct`` y
+        ``max_open_orders`` respetando los fingerprints históricos.
+        """
+
+        base = winner_mutations.copy()
+        variations: List[Dict[str, object]] = []
+        seen = set(history_fingerprints)
+        for i in range(1, 21):  # margen para asegurar 10
+            muts = json.loads(json.dumps(base))  # deep copy
+            thresh = muts.get("imbalance_buy_threshold_pct", 20)
+            if isinstance(thresh, (int, float)):
+                muts["imbalance_buy_threshold_pct"] = int(thresh) + i
+            rl = muts.get("risk_limits", {})
+            if isinstance(rl, dict):
+                moo = rl.get("max_open_orders", 1)
+                if isinstance(moo, int):
+                    rl["max_open_orders"] = max(1, moo + (i % 3))
+                rl.setdefault("per_pair_exposure_usd", 50)
+                muts["risk_limits"] = rl
+            fp = self._fingerprint(muts)
+            if fp in seen:
+                continue
+            seen.add(fp)
+            variations.append({"name": f"child-{i:02d}", "mutations": muts})
+            if len(variations) == 10:
+                break
+        return variations
+
+    # ------------------------------------------------------------------
+    def new_generation_from_winner(
+        self,
+        winner_mutations: Dict[str, object],
+        history_fingerprints: List[str],
+    ) -> List[Dict[str, object]]:
+        """Genera 10 variaciones nuevas basadas en el ganador anterior.
+
+        ``history_fingerprints`` contiene hashes de mutaciones previas para
+        evitar duplicados históricos.
+        """
+
+        raw: List[Dict[str, object]] = []
+        if self._client is not None:
+            prompt = PROMPT_NUEVA_GENERACION_DESDE_GANADOR.replace(
+                "<PEGAR_JSON_WINNER>", json.dumps(winner_mutations, ensure_ascii=False)
+            )
+            try:
+                resp = self._client.chat.completions.create(
+                    model=self.model,
+                    temperature=0.2,
+                    messages=[
+                        {"role": "system", "content": prompt},
+                        {
+                            "role": "user",
+                            "content": json.dumps({"history_fingerprints": history_fingerprints}),
+                        },
+                    ],
+                    timeout=40,
+                )
+                txt = resp.choices[0].message.content or "[]"
+                raw = json.loads(txt)
+                if not isinstance(raw, list):
+                    raw = []
+            except Exception:
+                raw = []
+        if not raw:
+            raw = self._fallback_new_generation(winner_mutations, history_fingerprints)
+
+        unique: List[Dict[str, object]] = []
+        seen = set(history_fingerprints)
+        for item in raw:
+            name = str(item.get("name")) if isinstance(item, dict) else ""
+            muts = item.get("mutations") if isinstance(item, dict) else None
+            if not name or not isinstance(muts, dict):
+                continue
+            fp = self._fingerprint(muts)
+            if fp in seen:
+                continue
+            seen.add(fp)
+            unique.append({"name": name, "mutations": muts})
+            if len(unique) == 10:
+                break
+
+        # rellenar si faltan
+        idx = 1
+        while len(unique) < 10:
+            base = json.loads(json.dumps(winner_mutations))
+            base["placeholder"] = idx
+            fp = self._fingerprint(base)
+            if fp not in seen:
+                unique.append({"name": f"auto-{idx:02d}", "mutations": base})
+                seen.add(fp)
+            idx += 1
+        return unique
+
+    # ------------------------------------------------------------------
     def analyze_cycle_and_pick_winner(self, cycle_summary: Dict[str, object]) -> Dict[str, object]:
         """Analiza un resumen de ciclo y elige un ganador.
 
@@ -166,4 +279,3 @@ class LLMClient:
             "winner_bot_id": int(best_id) if best_id is not None else -1,
             "reason": "max_pnl",
         }
-
