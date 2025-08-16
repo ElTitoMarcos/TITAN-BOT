@@ -13,7 +13,6 @@ from .models import BotConfig, BotStats, SupervisorEvent
 
 DB_FILENAME = "titanbot.db"
 
-
 class SQLiteStorage:
     """Persist data from supervisors and runners into SQLite."""
 
@@ -107,7 +106,6 @@ class SQLiteStorage:
                 "SELECT bot_id, cycle_id, name, seed_parent, mutations_json FROM bots WHERE bot_id = ?",
                 (bot_id,),
             ).fetchone()
-
         if row is None:
             return None
         return BotConfig(
@@ -182,7 +180,6 @@ class SQLiteStorage:
             params.append(cycle)
         with self._lock:
             rows = self.conn.execute(query, params).fetchall()
-
         return [
             BotStats(
                 bot_id=r["bot_id"],
@@ -232,7 +229,6 @@ class SQLiteStorage:
         placeholders = ",".join(["?"] * len(self._ORDER_COLS))
         cols = ",".join(self._ORDER_COLS)
         with self._lock, self.conn:
-
             self.conn.execute(
                 f"INSERT OR REPLACE INTO orders ({cols}) VALUES ({placeholders})",
                 values,

@@ -28,3 +28,11 @@ CONSTRICCIONES:
 - Todas aplicables a cualquier XXXBTC independientemente del precio (usar increments del exchange si aplica).
 Valida que el JSON sea parseable.
 """
+
+PROMPT_ANALISIS_CICLO = """
+Te paso un resumen del ciclo con 10 bots. Para cada bot: mutations, stats (orders, pnl, pnl_pct, win_rate, avg_hold_s, avg_slippage_ticks, timeouts, cancel_replace_count), top-3 pares por PnL, distribución de resultados por hora.
+Tarea: Elige UN ganador priorizando PNL y estabilidad (menor varianza y menos timeouts/slippage). Penaliza configuraciones con drawdowns altos o comportamiento errático. Devuelve JSON:
+{ "winner_bot_id": <int>, "reason": "<breve explicación>" }
+El JSON debe ser parseable. Nada más.
+"""
+=======

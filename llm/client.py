@@ -4,9 +4,7 @@ from __future__ import annotations
 import json
 import os
 from typing import Dict, List, Optional
-
-from .prompts import PROMPT_INICIAL_VARIACIONES
-
+from .prompts import PROMPT_INICIAL_VARIACIONES, PROMPT_ANALISIS_CICLO
 
 class LLMClient:
     """Wrapper liviano sobre OpenAI que genera variaciones iniciales.
@@ -112,3 +110,54 @@ class LLMClient:
                 seen.add(key)
             idx += 1
         return unique
+
+    # ------------------------------------------------------------------
+    def analyze_cycle_and_pick_winner(self, cycle_summary: Dict[str, object]) -> Dict[str, object]:
+        """Analiza un resumen de ciclo y elige un ganador.
+
+        Si la llamada al LLM falla o no hay API key, se usa como
+        fallback el bot con mayor PNL.
+        """
+
+        if self._client is not None:
+            try:
+                resp = self._client.chat.completions.create(
+                    model=self.model,
+                    temperature=0,
+                    messages=[
+                        {"role": "system", "content": PROMPT_ANALISIS_CICLO},
+                        {"role": "user", "content": json.dumps(cycle_summary)},
+                    ],
+                    timeout=40,
+                )
+                txt = resp.choices[0].message.content or "{}"
+                data = json.loads(txt)
+                if isinstance(data, dict) and "winner_bot_id" in data:
+                    return {
+                        "winner_bot_id": int(data["winner_bot_id"]),
+                        "reason": str(data.get("reason", "")),
+                    }
+            except Exception:
+                pass
+        return self._fallback_winner(cycle_summary)
+
+    # ------------------------------------------------------------------
+    def _fallback_winner(self, cycle_summary: Dict[str, object]) -> Dict[str, object]:
+        """Selecciona el ganador por máximo PNL."""
+
+        bots = cycle_summary.get("bots", [])
+        best_id = None
+        best_pnl = float("-inf")
+        for bot in bots:
+            try:
+                pnl = float(bot.get("stats", {}).get("pnl", float("-inf")))
+            except Exception:
+                pnl = float("-inf")
+            if pnl > best_pnl:
+                best_pnl = pnl
+                best_id = bot.get("bot_id")
+        return {
+            "winner_bot_id": int(best_id) if best_id is not None else -1,
+            "reason": "max_pnl",
+        }
+=======

@@ -79,14 +79,34 @@ class Supervisor:
         while self._running:
             asyncio.run(self.run_cycle(cycle))
             stats = self.gather_results(cycle)
-            winner_id, winner_cfg = self.pick_winner(cycle)
+            cycle_summary = self._compose_cycle_summary(cycle, stats)
+            client = LLMClient()
+            try:
+                decision = client.analyze_cycle_and_pick_winner(cycle_summary)
+                winner_id = int(decision.get("winner_bot_id", -1))
+                winner_reason = str(decision.get("reason", ""))
+                winner_cfg = self.storage.get_bot(winner_id)
+                if winner_cfg is None:
+                    raise ValueError("winner cfg not found")
+            except Exception:
+                winner_id, winner_cfg = self.pick_winner(cycle)
+                winner_reason = "max_pnl"
             self._emit(
                 "INFO",
                 "cycle",
                 cycle,
                 None,
                 "cycle_winner",
-                {"winner_id": winner_id},
+                {"winner_id": winner_id, "reason": winner_reason},
+            )
+            self._emit("INFO", "bot", cycle, winner_id, "bot_winner", {"reason": winner_reason})
+            self.storage.save_cycle_summary(
+                cycle,
+                {
+                    "finished_at": datetime.utcnow().isoformat(),
+                    "winner_bot_id": winner_id,
+                    "winner_reason": winner_reason,
+                },
             )
             self.storage.save_cycle_summary(
                 cycle,
@@ -172,6 +192,43 @@ class Supervisor:
     def gather_results(self, cycle: int) -> List[BotStats]:
         """Obtiene las estadísticas de un ciclo."""
         return [s for s in self.storage.iter_stats() if s.cycle == cycle]
+
+    def _compose_cycle_summary(self, cycle: int, stats: List[BotStats]) -> Dict[str, object]:
+        """Construye el payload que se envía al LLM para análisis."""
+
+        summary: Dict[str, object] = {"cycle": cycle, "bots": []}
+        for s in stats:
+            cfg = self.storage.get_bot(s.bot_id)
+            orders = self.storage.iter_orders(cycle, s.bot_id)
+            pairs: Dict[str, float] = {}
+            for o in orders:
+                sym = o.get("symbol")
+                pnl = float(o.get("pnl") or 0)
+                if sym:
+                    pairs[sym] = pairs.get(sym, 0.0) + pnl
+            top3 = [
+                {"symbol": sym, "pnl": pnl}
+                for sym, pnl in sorted(pairs.items(), key=lambda x: x[1], reverse=True)[:3]
+            ]
+            summary["bots"].append(
+                {
+                    "bot_id": s.bot_id,
+                    "mutations": cfg.mutations if cfg else {},
+                    "stats": {
+                        "orders": s.orders,
+                        "pnl": s.pnl,
+                        "pnl_pct": s.pnl_pct,
+                        "win_rate": s.wins / s.orders if s.orders else 0.0,
+                        "avg_hold_s": 0.0,
+                        "avg_slippage_ticks": 0.0,
+                        "timeouts": 0,
+                        "cancel_replace_count": 0,
+                    },
+                    "top3_pairs": top3,
+                    "hourly_dist": {},
+                }
+            )
+        return summary
 
     def pick_winner(self, cycle: int) -> Tuple[int, BotConfig]:
         """Selecciona el bot con mayor PNL."""
