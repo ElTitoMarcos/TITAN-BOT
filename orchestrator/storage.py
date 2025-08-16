@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
+
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -17,8 +19,10 @@ class SQLiteStorage:
 
     def __init__(self, db_path: Optional[str] = None) -> None:
         self.db_path = db_path or DB_FILENAME
-        self.conn = sqlite3.connect(self.db_path)
+        # allow cross-thread usage (UI thread spawns supervisor thread)
+        self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
+        self._lock = threading.Lock()
         self._init_db()
 
     # ------------------------------------------------------------------
@@ -32,7 +36,7 @@ class SQLiteStorage:
     # ------------------------------------------------------------------
     # Events
     def append_event(self, event: SupervisorEvent) -> None:
-        with self.conn:
+        with self._lock, self.conn:
             self.conn.execute(
                 """
                 INSERT INTO events (ts, level, scope, bot_id, cycle_id, message, payload_json)
@@ -55,7 +59,9 @@ class SQLiteStorage:
         if cycle is not None:
             query += " WHERE cycle_id = ?"
             params.append(cycle)
-        rows = self.conn.execute(query, params).fetchall()
+        with self._lock:
+            rows = self.conn.execute(query, params).fetchall()
+
         events = []
         for row in rows:
             payload = json.loads(row["payload_json"]) if row["payload_json"] else None
@@ -75,7 +81,7 @@ class SQLiteStorage:
     # ------------------------------------------------------------------
     # Bots
     def save_bot(self, bot_config: BotConfig) -> None:
-        with self.conn:
+        with self._lock, self.conn:
             self.conn.execute(
                 """
                 INSERT INTO bots (bot_id, cycle_id, name, seed_parent, mutations_json, created_at)
@@ -96,10 +102,12 @@ class SQLiteStorage:
             )
 
     def get_bot(self, bot_id: int) -> Optional[BotConfig]:
-        row = self.conn.execute(
-            "SELECT bot_id, cycle_id, name, seed_parent, mutations_json FROM bots WHERE bot_id = ?",
-            (bot_id,),
-        ).fetchone()
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT bot_id, cycle_id, name, seed_parent, mutations_json FROM bots WHERE bot_id = ?",
+                (bot_id,),
+            ).fetchone()
+
         if row is None:
             return None
         return BotConfig(
@@ -113,7 +121,7 @@ class SQLiteStorage:
     # ------------------------------------------------------------------
     # Bot stats
     def save_bot_stats(self, stats: BotStats) -> None:
-        with self.conn:
+        with self._lock, self.conn:
             self.conn.execute(
                 """
                 INSERT INTO bot_stats (
@@ -150,7 +158,9 @@ class SQLiteStorage:
             query += " AND cycle_id = ?"
             params.append(cycle)
         query += " ORDER BY cycle_id DESC LIMIT 1"
-        row = self.conn.execute(query, params).fetchone()
+        with self._lock:
+            row = self.conn.execute(query, params).fetchone()
+
         if row is None:
             return None
         return BotStats(
@@ -170,7 +180,9 @@ class SQLiteStorage:
         if cycle is not None:
             query += " WHERE cycle_id = ?"
             params.append(cycle)
-        rows = self.conn.execute(query, params).fetchall()
+        with self._lock:
+            rows = self.conn.execute(query, params).fetchall()
+
         return [
             BotStats(
                 bot_id=r["bot_id"],
@@ -219,7 +231,8 @@ class SQLiteStorage:
         values = [order.get(col) for col in self._ORDER_COLS]
         placeholders = ",".join(["?"] * len(self._ORDER_COLS))
         cols = ",".join(self._ORDER_COLS)
-        with self.conn:
+        with self._lock, self.conn:
+
             self.conn.execute(
                 f"INSERT OR REPLACE INTO orders ({cols}) VALUES ({placeholders})",
                 values,
@@ -239,7 +252,8 @@ class SQLiteStorage:
             params.append(bot_id)
         if clauses:
             query += " WHERE " + " AND ".join(clauses)
-        rows = self.conn.execute(query, params).fetchall()
+        with self._lock:
+            rows = self.conn.execute(query, params).fetchall()
         return [dict(r) for r in rows]
 
     # ------------------------------------------------------------------
@@ -249,7 +263,7 @@ class SQLiteStorage:
         finished_at = summary.get("finished_at")
         winner_bot_id = summary.get("winner_bot_id")
         winner_reason = summary.get("winner_reason")
-        with self.conn:
+        with self._lock, self.conn:
             self.conn.execute(
                 """
                 INSERT INTO cycles (cycle_id, started_at, finished_at, winner_bot_id, winner_reason)
@@ -264,14 +278,17 @@ class SQLiteStorage:
             )
 
     def get_cycle_summary(self, cycle: int) -> Optional[Dict[str, Any]]:
-        row = self.conn.execute(
-            "SELECT cycle_id, started_at, finished_at, winner_bot_id, winner_reason FROM cycles WHERE cycle_id = ?",
-            (cycle,),
-        ).fetchone()
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT cycle_id, started_at, finished_at, winner_bot_id, winner_reason FROM cycles WHERE cycle_id = ?",
+                (cycle,),
+            ).fetchone()
+
         if row is None:
             return None
         return dict(row)
 
     # ------------------------------------------------------------------
     def close(self) -> None:
-        self.conn.close()
+        with self._lock:
+            self.conn.close()

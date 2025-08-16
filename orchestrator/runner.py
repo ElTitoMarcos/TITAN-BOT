@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import time
 from datetime import datetime
-
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .models import BotConfig, BotStats
@@ -87,7 +86,6 @@ class BotRunner:
             params, open_orders, self.exchange.get_order_book
         )
         for (buy, sell), upd in zip(open_orders, updates):
-
             pnl += upd.get("pnl", 0.0)
             if upd.get("pnl", 0.0) >= 0:
                 wins += 1
