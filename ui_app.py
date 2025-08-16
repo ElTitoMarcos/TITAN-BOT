@@ -6,7 +6,7 @@ from tkinter import ttk
 from typing import Dict, Any, List
 
 from config import UIColors, Defaults, AppState as CoreAppState
-from engine import Engine
+from engine import Engine, load_sim_config
 from llm_client import LLMClient
 from components.testeos_frame import TesteosFrame
 from state.app_state import AppState as MassTestState
@@ -99,6 +99,7 @@ class App(tb.Window):
         self.exchange = None
         self._tester = None
         self.var_min_orders = tb.IntVar(value=50)
+        self._winner_cfg = None
 
         self._keys_file = os.path.join(os.path.dirname(__file__), ".api_keys.json")
 
@@ -485,9 +486,19 @@ class App(tb.Window):
 
     def on_load_winner_for_sim(self) -> None:
         """Carga la configuración ganadora en el bot SIM."""
-        self.log_append("[TEST] Subir Bot Sim presionado")
-        self.mass_state.next_bot_id += 1
-        self.mass_state.save()
+        if not self._winner_cfg:
+            self.log_append("[TEST] No hay ganador disponible")
+            return
+        try:
+            if self._engine_sim and self._engine_sim.is_alive():
+                self._engine_sim.stop()
+            self._engine_sim = load_sim_config(self._winner_cfg.mutations)
+            self._engine_sim.start()
+            self.var_bot_sim.set(True)
+            self.lbl_state_sim.configure(text="SIM: ON", bootstyle=SUCCESS)
+            self.log_append("[TEST] Bot ganador cargado en modo SIM")
+        except Exception as exc:
+            self.log_append(f"[TEST] Error al cargar ganador: {exc}")
 
     # ------------------- Log helpers -------------------
     def log_append(self, msg: str):
@@ -507,7 +518,28 @@ class App(tb.Window):
         try:
             while True:
                 ev = self._event_queue.get_nowait()
-                self.testeos_frame.handle_event(ev)
+                if ev.message == "cycle_start":
+                    self.testeos_frame.clear()
+                elif ev.message == "bot_start":
+                    self.testeos_frame.update_bot_row(
+                        {
+                            "bot_id": ev.bot_id,
+                            "cycle": ev.cycle,
+                            "orders": 0,
+                            "pnl": 0.0,
+                            "status": "RUNNING",
+                        }
+                    )
+                elif ev.message == "bot_finished" and ev.payload:
+                    stats = ev.payload.get("stats", {})
+                    stats.update({"bot_id": ev.bot_id, "cycle": ev.cycle, "status": "DONE"})
+                    self.testeos_frame.update_bot_row(stats)
+                elif ev.message == "cycle_winner" and ev.payload:
+                    wid = ev.payload.get("winner_id")
+                    reason = ev.payload.get("reason", "")
+                    if wid is not None:
+                        self._winner_cfg = self._supervisor.storage.get_bot(wid)
+                        self.testeos_frame.set_winner(int(wid), reason)
         except queue.Empty:
             pass
         self.after(200, self._poll_event_queue)
