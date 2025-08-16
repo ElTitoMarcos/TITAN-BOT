@@ -93,6 +93,7 @@ class TestManager(threading.Thread):
                     self.info(
                         f"Bot {v.get('id')}: {tr.get('side')} {tr.get('symbol')} {tr.get('qty_usd',0):.2f}USD @ {tr.get('price',0):.8f}"
                     )
+
             desc = v.get("description", "")
             self.info(f"Bot {v.get('id')}: {desc} -> pnl {v['pnl']:.2f}")
             self.history.append(v)
