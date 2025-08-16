@@ -611,6 +611,9 @@ class App(tb.Window):
     def _apply_binance_keys(self):
         key = self.var_bin_key.get().strip()
         sec = self.var_bin_sec.get().strip()
+        if not key or not sec:
+            self.log_append("[ENGINE] Claves de Binance incompletas.")
+            return False
         self._ensure_exchange()
         self.exchange.set_api_keys(key, sec)
         if self._engine_sim:
@@ -620,9 +623,9 @@ class App(tb.Window):
         self.log_append("[ENGINE] Claves de Binance aplicadas.")
         try:
             self.exchange.load_markets()
-            return True
-        except Exception:
-            return False
+        except Exception as e:
+            self.log_append(f"[ENGINE] No se pudieron verificar las claves ({e}). Continuando de todos modos.")
+        return True
 
     def _apply_openai_key(self):
         k = self.var_oai_key.get().strip()
