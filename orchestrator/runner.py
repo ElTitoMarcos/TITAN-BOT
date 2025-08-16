@@ -78,6 +78,7 @@ class BotRunner:
                     "raw_json": json.dumps(sell),
                 }
             )
+
             open_orders.append((buy, sell))
             orders_count += 2
 
