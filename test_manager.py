@@ -59,7 +59,11 @@ class TestManager(threading.Thread):
                     setattr(cfg_copy, k, val)
                 except Exception:
                     pass
-            eng = Engine(ui_push_snapshot=lambda _: None, ui_log=self.log, name=f"TEST-{v.get('id')}")
+            self.info(f"Bot {v.get('id')}: cambios {json.dumps(v.get('changes', {}))}")
+            def bot_log(msg: str, bot_id=v.get('id')):
+                self.info(f"Bot {bot_id}: {msg}")
+                self.log(f"[TEST-{bot_id}] {msg}")
+            eng = Engine(ui_push_snapshot=lambda _: None, ui_log=bot_log, name=f"TEST-{v.get('id')}")
             eng.cfg = cfg_copy
             eng.mode = "SIM"
             eng.llm = self.llm
@@ -75,6 +79,10 @@ class TestManager(threading.Thread):
                 eng.join(timeout=5)
             except Exception:
                 pass
+            for tr in eng._closed_orders:
+                self.info(
+                    f"Bot {v.get('id')}: {tr.get('side')} {tr.get('symbol')} {tr.get('qty_usd',0):.2f}USD @ {tr.get('price',0):.8f}"
+                )
             desc = v.get("description", "")
             self.info(f"Bot {v.get('id')}: {desc} -> pnl {v['pnl']:.2f}")
             self.history.append(v)

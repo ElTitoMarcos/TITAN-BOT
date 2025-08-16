@@ -172,6 +172,9 @@ class Engine(threading.Thread):
         }
         self._closed_orders.append(trade)
         self._log_audit("FILL", sym, f"{side.upper()} {qty_usd:.2f} USD @ {fill_price} ({order.get('mode')})")
+        self.ui_log(
+            f"[ENGINE {self.name}] FILL {side.upper()} {sym} {qty_usd:.2f} @ {fill_price}"
+        )
 
     def _sim_mark_to_market(self, pairs: List[Dict[str, Any]]):
         pnl_usd = 0.0
@@ -305,20 +308,35 @@ class Engine(threading.Thread):
         thr = float(snapshot["config"]["opportunity_threshold_percent"]) * 100.0
         size_usd = float(snapshot["config"]["size_usd"])
         for a in actions:
-            sym = a.get("symbol","")
-            t = a.get("type","")
+            sym = a.get("symbol", "")
+            t = a.get("type", "")
             price = float(a.get("price", 0.0) or 0.0)
             qty_usd = float(a.get("qty_usd", 0.0) or 0.0)
             if qty_usd <= 0.0 or qty_usd > size_usd:
+                self.ui_log(
+                    f"[ENGINE {self.name}] Descartando {t} {sym}: qty {qty_usd} fuera de rango"
+                )
                 continue
             if "PLACE_" in t and price <= 0.0:
+                self.ui_log(
+                    f"[ENGINE {self.name}] Descartando {t} {sym}: precio inválido"
+                )
                 continue
-            par = next((p for p in snapshot["pairs"] if p.get("symbol")==sym), None)
+            par = next((p for p in snapshot["pairs"] if p.get("symbol") == sym), None)
             if not par:
+                self.ui_log(
+                    f"[ENGINE {self.name}] Descartando {t} {sym}: par desconocido"
+                )
                 continue
             edge = float(par.get("edge_est_bps", 0.0))
             if edge < thr:
+                self.ui_log(
+                    f"[ENGINE {self.name}] Descartando {t} {sym}: edge {edge:.2f} < thr {thr:.2f}"
+                )
                 continue
+            self.ui_log(
+                f"[ENGINE {self.name}] Validada {t} {sym} {qty_usd:.2f} USD @ {price}"
+            )
             out.append(a)
         return out
     def execute_actions(self, actions: List[Dict[str, Any]], snapshot: Dict[str, Any]):
@@ -333,9 +351,12 @@ class Engine(threading.Thread):
                 if self.mode == "SIM":
                     oid = self._sim_queue_limit(sym, price, qty_usd, side="buy", par=par)
                     self._log_audit("NEW", sym, f"SIM LIMIT BUY {qty_usd:.2f} USD @ {price} (oid {oid})")
+                    self.ui_log(f"[ENGINE {self.name}] Orden SIM BUY {sym} {qty_usd:.2f} @ {price} (oid {oid})")
                 elif self.mode == "LIVE":
                     if not (self.state.live_confirmed and self.exchange.is_live_ready()):
-                        self._last_reasons.append("LIVE bloqueado: falta Confirm LIVE o API keys.")
+                        msg = "LIVE bloqueado: falta Confirm LIVE o API keys."
+                        self._last_reasons.append(msg)
+                        self.ui_log(f"[ENGINE {self.name}] {msg}")
                         continue
                     try:
                         base, quote = sym.split("/")
@@ -346,16 +367,22 @@ class Engine(threading.Thread):
                         oid = order.get("id", f"LIVE-{uuid.uuid4().hex[:8]}")
                         self._open_orders[oid] = {"id": oid, "symbol": sym, "price": price, "qty_usd": qty_usd, "side": "buy", "mode": "LIVE", "ts": int(time.time()*1000)}
                         self._log_audit("NEW", sym, f"LIVE LIMIT BUY {qty_usd:.2f} USD @ {price} (oid {oid})")
+                        self.ui_log(f"[ENGINE {self.name}] Orden LIVE BUY {sym} {qty_usd:.2f} @ {price} (oid {oid})")
                     except Exception as e:
-                        self._last_reasons.append(f"Error al crear orden LIVE BUY: {e}")
+                        msg = f"Error al crear orden LIVE BUY: {e}"
+                        self._last_reasons.append(msg)
+                        self.ui_log(f"[ENGINE {self.name}] {msg}")
 
             elif t == "PLACE_LIMIT_SELL":
                 if self.mode == "SIM":
                     oid = self._sim_queue_limit(sym, price, qty_usd, side="sell", par=par)
                     self._log_audit("NEW", sym, f"SIM LIMIT SELL {qty_usd:.2f} USD @ {price} (oid {oid})")
+                    self.ui_log(f"[ENGINE {self.name}] Orden SIM SELL {sym} {qty_usd:.2f} @ {price} (oid {oid})")
                 elif self.mode == "LIVE":
                     if not (self.state.live_confirmed and self.exchange.is_live_ready()):
-                        self._last_reasons.append("LIVE bloqueado: falta Confirm LIVE o API keys.")
+                        msg = "LIVE bloqueado: falta Confirm LIVE o API keys."
+                        self._last_reasons.append(msg)
+                        self.ui_log(f"[ENGINE {self.name}] {msg}")
                         continue
                     try:
                         base, quote = sym.split("/")
@@ -366,8 +393,11 @@ class Engine(threading.Thread):
                         oid = order.get("id", f"LIVE-{uuid.uuid4().hex[:8]}")
                         self._open_orders[oid] = {"id": oid, "symbol": sym, "price": price, "qty_usd": qty_usd, "side": "sell", "mode": "LIVE", "ts": int(time.time()*1000)}
                         self._log_audit("NEW", sym, f"LIVE LIMIT SELL {qty_usd:.2f} USD @ {price} (oid {oid})")
+                        self.ui_log(f"[ENGINE {self.name}] Orden LIVE SELL {sym} {qty_usd:.2f} @ {price} (oid {oid})")
                     except Exception as e:
-                        self._last_reasons.append(f"Error al crear orden LIVE SELL: {e}")
+                        msg = f"Error al crear orden LIVE SELL: {e}"
+                        self._last_reasons.append(msg)
+                        self.ui_log(f"[ENGINE {self.name}] {msg}")
 
             elif t == "CANCEL_ORDER":
                 ref = a.get("ref_order_id")
@@ -375,6 +405,7 @@ class Engine(threading.Thread):
                     if ref in self._open_orders:
                         self._open_orders.pop(ref, None)
                         self._log_audit("CANCEL", sym, f"Cancelada {ref} (SIM/LIVE cache)")
+                        self.ui_log(f"[ENGINE {self.name}] Cancelada {ref}")
                     try:
                         self.exchange.exchange.cancel_order(ref, sym)
                     except Exception:
@@ -389,6 +420,7 @@ class Engine(threading.Thread):
                         o["price"] = new_price
                         o["ts"] = int(time.time()*1000)
                         self._log_audit("MODIFY", sym, f"Modificada {ref} -> precio {new_price}")
+                        self.ui_log(f"[ENGINE {self.name}] Modificada {ref} -> {new_price}")
                     try:
                         self.exchange.exchange.cancel_order(ref, sym)
                     except Exception:
@@ -404,8 +436,11 @@ class Engine(threading.Thread):
                         oid = order.get("id", f"LIVE-{uuid.uuid4().hex[:8]}")
                         self._open_orders[oid] = {"id": oid, "symbol": sym, "price": new_price, "qty_usd": cached.get("qty_usd", qty_usd), "side": side, "mode": "LIVE", "ts": int(time.time()*1000)}
                         self._log_audit("NEW", sym, f"LIVE REPLACE {side.upper()} {cached.get('qty_usd', qty_usd):.2f} @ {new_price} (oid {oid})")
+                        self.ui_log(f"[ENGINE {self.name}] LIVE REPLACE {side.upper()} {sym} {cached.get('qty_usd', qty_usd):.2f} @ {new_price} (oid {oid})")
                     except Exception as e:
-                        self._last_reasons.append(f"Error al modificar LIVE: {e}")
+                        msg = f"Error al modificar LIVE: {e}"
+                        self._last_reasons.append(msg)
+                        self.ui_log(f"[ENGINE {self.name}] {msg}")
 
             elif t == "CLOSE_POSITION_MARKET":
                 par = next((p for p in snapshot["pairs"] if p.get("symbol")==sym), None)
