@@ -134,6 +134,8 @@ class App(tb.Window):
         self._lock_controls(True)
         self.after(250, self._poll_log_queue)
         self.after(4000, self._tick_ui_refresh)
+        self.after(3000, self._tick_open_orders)
+        self.after(3000, self._tick_closed_orders)
 
         # Precarga de mercado y balance
         self._warmup_thread = threading.Thread(target=self._warmup_load_market, daemon=True)
@@ -341,10 +343,13 @@ class App(tb.Window):
         self.txt_info.grid(row=0, column=0, columnspan=2, sticky="nsew")
         ttk.Label(frm_info, text="Órdenes mínimas").grid(row=1, column=0, sticky="w")
         ttk.Entry(frm_info, textvariable=self.var_min_orders, width=10).grid(row=1, column=1, sticky="e")
+        ttk.Button(frm_info, text="Aplicar mín. órdenes", command=self._apply_min_orders).grid(
+            row=2, column=0, columnspan=2, sticky="ew", pady=(4, 0)
+        )
         self.btn_tests = ttk.Button(frm_info, text="Iniciar Testeos", command=self._toggle_tests)
-        self.btn_tests.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(4,0))
-        ttk.Button(frm_info, text="Revertir patch", command=self._revert_patch).grid(row=3, column=0, sticky="ew", pady=(4,0))
-        ttk.Button(frm_info, text="Aplicar a LIVE", command=self._apply_winner_live).grid(row=3, column=1, sticky="ew", pady=(4,0))
+        self.btn_tests.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(4,0))
+        ttk.Button(frm_info, text="Revertir patch", command=self._revert_patch).grid(row=4, column=0, sticky="ew", pady=(4,0))
+        ttk.Button(frm_info, text="Aplicar a LIVE", command=self._apply_winner_live).grid(row=4, column=1, sticky="ew", pady=(4,0))
 
         # Métricas de Score
         frm_met = ttk.Labelframe(right, text="Métricas Score", padding=8)
@@ -704,6 +709,14 @@ class App(tb.Window):
         if self._engine_live:
             self._engine_live.cfg.weights = dict(self.cfg.weights)
         threading.Thread(target=self._refresh_market_candidates, daemon=True).start()
+
+    def _apply_min_orders(self):
+        try:
+            val = max(1, int(self.var_min_orders.get()))
+            self.var_min_orders.set(val)
+            self.log_append(f"[TEST] Órdenes mínimas = {val}")
+        except Exception:
+            self.log_append("[TEST] Valor inválido para órdenes mínimas")
 
     def _toggle_tests(self):
         if self._tester and self._tester.is_alive():
