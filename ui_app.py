@@ -624,6 +624,9 @@ class App(tb.Window):
 
     def _apply_openai_key(self):
         k = self.var_oai_key.get().strip()
+        if not k:
+            self.log_append("[LLM] Clave de ChatGPT no proporcionada. Usando heurística local.")
+            return True
         client = None
         if self._engine_sim:
             self._engine_sim.llm.set_api_key(k)
@@ -648,13 +651,15 @@ class App(tb.Window):
     def _confirm_apis(self):
         ok_bin = self._apply_binance_keys()
         ok_oai = self._apply_openai_key()
-        if ok_bin and ok_oai:
+        if ok_bin:
+            if not ok_oai:
+                self.log_append("[APP] Clave de ChatGPT inválida. Continuando sin LLM.")
             self._save_api_keys()
             self._lock_controls(False)
             self.log_append("[APP] APIs verificadas. Desbloqueando interfaz.")
             self._refresh_market_candidates()
         else:
-            self.log_append("[APP] Error verificando APIs. Revísalas e intenta nuevamente.")
+            self.log_append("[APP] Error verificando APIs de Binance. Revísalas e intenta nuevamente.")
 
     def _apply_llm(self):
         if self._engine_sim:
