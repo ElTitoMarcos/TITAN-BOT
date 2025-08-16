@@ -78,6 +78,7 @@ class BotRunner:
                     "raw_json": json.dumps(sell),
                 }
             )
+
             open_orders.append((buy, sell))
             orders_count += 2
 
@@ -105,6 +106,7 @@ class BotRunner:
                     "raw_json": json.dumps(order),
                 }
                 self.storage.save_order(data)
+
             self.ui_callback({"bot_id": self.config.id, **upd})
 
         runtime_s = int(time.time() - start)

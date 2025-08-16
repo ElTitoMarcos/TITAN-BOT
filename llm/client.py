@@ -12,7 +12,6 @@ from .prompts import (
     PROMPT_NUEVA_GENERACION_DESDE_GANADOR,
 )
 
-
 class LLMClient:
     """Wrapper liviano sobre OpenAI que genera variaciones iniciales.
 
