@@ -1,7 +1,10 @@
 """Asynchronous runner executing a single bot instance."""
 from __future__ import annotations
 
+import json
 import time
+from datetime import datetime
+
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .models import BotConfig, BotStats
@@ -47,19 +50,65 @@ class BotRunner:
             if orders_count + 2 > self.limits.get("max_orders", float("inf")):
                 break
             buy = await self.strategy.place_buy(params, sym)
+            self.storage.save_order(
+                {
+                    "order_id": buy.get("id"),
+                    "bot_id": self.config.id,
+                    "cycle_id": self.config.cycle,
+                    "symbol": buy.get("symbol", sym),
+                    "side": "buy",
+                    "qty": buy.get("amount"),
+                    "price": buy.get("price"),
+                    "ts": datetime.utcnow().isoformat(),
+                    "status": "open",
+                    "raw_json": json.dumps(buy),
+                }
+            )
             sell = await self.strategy.place_sell_plus_ticks(params, sym, buy)
+            self.storage.save_order(
+                {
+                    "order_id": sell.get("id"),
+                    "bot_id": self.config.id,
+                    "cycle_id": self.config.cycle,
+                    "symbol": sell.get("symbol", sym),
+                    "side": "sell",
+                    "qty": sell.get("amount"),
+                    "price": sell.get("price"),
+                    "ts": datetime.utcnow().isoformat(),
+                    "status": "open",
+                    "raw_json": json.dumps(sell),
+                }
+            )
+
             open_orders.append((buy, sell))
             orders_count += 2
 
         updates = await self.strategy.monitor_and_adjust(
             params, open_orders, self.exchange.get_order_book
         )
-        for upd in updates:
+        for (buy, sell), upd in zip(open_orders, updates):
+
             pnl += upd.get("pnl", 0.0)
             if upd.get("pnl", 0.0) >= 0:
                 wins += 1
             else:
                 losses += 1
+            for side, order in (("buy", buy), ("sell", sell)):
+                data = {
+                    "order_id": order.get("id"),
+                    "bot_id": self.config.id,
+                    "cycle_id": self.config.cycle,
+                    "symbol": order.get("symbol"),
+                    "side": side,
+                    "qty": order.get("amount"),
+                    "price": order.get("price"),
+                    "ts": datetime.utcnow().isoformat(),
+                    "status": "filled",
+                    "pnl": upd.get("pnl") if side == "sell" else None,
+                    "raw_json": json.dumps(order),
+                }
+                self.storage.save_order(data)
+
             self.ui_callback({"bot_id": self.config.id, **upd})
 
         runtime_s = int(time.time() - start)

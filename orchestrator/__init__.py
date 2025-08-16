@@ -1,7 +1,7 @@
 """Helper exports for orchestrator package."""
 from .models import BotConfig, BotStats, SupervisorEvent
 from .runner import BotRunner
-from .storage import InMemoryStorage
+from .storage import SQLiteStorage
 from .supervisor import Supervisor
 
 __all__ = [
@@ -10,5 +10,5 @@ __all__ = [
     "BotConfig",
     "BotStats",
     "SupervisorEvent",
-    "InMemoryStorage",
+    "SQLiteStorage",
 ]

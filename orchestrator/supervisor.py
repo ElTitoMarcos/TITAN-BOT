@@ -11,14 +11,14 @@ from typing import Callable, Dict, List, Optional, Tuple
 from llm import LLMClient
 
 from .models import BotConfig, BotStats, SupervisorEvent
-from .storage import InMemoryStorage
+from .storage import SQLiteStorage
 
 
 class Supervisor:
     """Orquesta ciclos de bots ejecutados en paralelo."""
 
-    def __init__(self, storage: Optional[InMemoryStorage] = None) -> None:
-        self.storage = storage or InMemoryStorage()
+    def __init__(self, storage: Optional[SQLiteStorage] = None) -> None:
+        self.storage = storage or SQLiteStorage()
         self._callbacks: List[Callable[[SupervisorEvent], None]] = []
         self._running = False
         self._thread: Optional[threading.Thread] = None
@@ -88,6 +88,14 @@ class Supervisor:
                 "cycle_winner",
                 {"winner_id": winner_id},
             )
+            self.storage.save_cycle_summary(
+                cycle,
+                {
+                    "finished_at": datetime.utcnow().isoformat(),
+                    "winner_bot_id": winner_id,
+                    "winner_reason": "pnl",
+                },
+            )
             self.spawn_next_generation_from_winner(winner_cfg)
             cycle += 1
         self._running = False
@@ -95,6 +103,8 @@ class Supervisor:
     # ------------------------------------------------------------------
     async def run_cycle(self, cycle: int) -> None:
         """Ejecuta un ciclo completo simulando bots."""
+        # Persist start of cycle
+        self.storage.save_cycle_summary(cycle, {"started_at": datetime.utcnow().isoformat()})
         # Generar bots si es la primera vez
         if not self._current_generation:
             variations: List[Dict[str, object]] = []
