@@ -298,6 +298,106 @@ class App(tb.Window):
         except Exception:
             pass
 
+    def _confirm_apis(self):
+        """Confirma y guarda las claves API ingresadas en la UI."""
+        self._save_api_keys()
+        key = self.var_bin_key.get().strip()
+        sec = self.var_bin_sec.get().strip()
+        oai = self.var_oai_key.get().strip()
+        try:
+            self._ensure_exchange()
+            self.exchange.set_api_keys(key, sec)
+        except Exception:
+            pass
+        for eng in (self._engine_sim, self._engine_live):
+            try:
+                if eng:
+                    eng.exchange.set_api_keys(key, sec)
+                    eng.llm.set_api_key(oai)
+            except Exception:
+                pass
+        self.log_append("[API] Claves actualizadas")
+        self._lock_controls(False)
+
+    def _on_engine_snapshot(self, snap: Dict[str, Any]):
+        """Callback para recibir snapshots del motor."""
+        self._snapshot = snap
+
+    def _on_bot_sim(self, *_):
+        if self.var_bot_sim.get():
+            if not self._engine_sim or not self._engine_sim.is_alive():
+                self._ensure_exchange()
+                self._engine_sim = Engine(self._on_engine_snapshot, self.log_append, exchange=self.exchange, name="SIM")
+                self._engine_sim.mode = "SIM"
+                self._engine_sim.start()
+            self.lbl_state_sim.configure(text="SIM: ON", bootstyle=SUCCESS)
+        else:
+            if self._engine_sim and self._engine_sim.is_alive():
+                self._engine_sim.stop()
+            self.lbl_state_sim.configure(text="SIM: OFF", bootstyle=SECONDARY)
+
+    def _on_bot_live(self, *_):
+        if self.var_bot_live.get():
+            if not self._engine_live or not self._engine_live.is_alive():
+                self._ensure_exchange()
+                self._engine_live = Engine(self._on_engine_snapshot, self.log_append, exchange=self.exchange, name="LIVE")
+                self._engine_live.mode = "LIVE"
+                self._engine_live.state.live_confirmed = self.state.live_confirmed
+                self._engine_live.start()
+            self.lbl_state_live.configure(text="LIVE: ON", bootstyle=SUCCESS)
+        else:
+            if self._engine_live and self._engine_live.is_alive():
+                self._engine_live.stop()
+            self.lbl_state_live.configure(text="LIVE: OFF", bootstyle=SECONDARY)
+
+    def _on_live_confirm(self, *_):
+        val = bool(self.var_live_confirm.get())
+        self.state.live_confirmed = val
+        if self._engine_live:
+            self._engine_live.state.live_confirmed = val
+        self.log_append(f"[LIVE] Confirmación {'activada' if val else 'desactivada'}")
+
+    def _apply_llm(self):
+        model = self.var_llm_model.get()
+        self.cfg.llm_model = model
+        for eng in (self._engine_sim, self._engine_live):
+            try:
+                if eng:
+                    eng.llm.set_model(model)
+            except Exception:
+                pass
+        self.log_append(f"[LLM] Modelo aplicado: {model}")
+
+    def _send_llm_query(self):
+        query = self.var_llm_query.get().strip()
+        if not query:
+            return
+        llm = None
+        if self._engine_sim:
+            llm = self._engine_sim.llm
+        elif self._engine_live:
+            llm = self._engine_live.llm
+        else:
+            llm = LLMClient(model=self.var_llm_model.get(), api_key=self.var_oai_key.get())
+        resp = ""
+        try:
+            resp = llm.ask(query)
+        except Exception:
+            resp = ""
+        self.txt_llm_resp.delete("1.0", "end")
+        self.txt_llm_resp.insert("end", resp)
+
+    def _revert_patch(self):
+        for eng in (self._engine_sim, self._engine_live):
+            try:
+                if eng:
+                    eng.revert_last_patch()
+            except Exception:
+                pass
+
+    def _apply_winner_live(self):
+        self.log_append("[TEST] Aplicar ganador a LIVE presionado")
+
     # ------------------- Configuración -------------------
     def _apply_sizes(self):
       
