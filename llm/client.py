@@ -143,7 +143,13 @@ class LLMClient:
 
     # ------------------------------------------------------------------
     def _fallback_winner(self, cycle_summary: Dict[str, object]) -> Dict[str, object]:
-        """Selecciona el ganador por máximo PNL."""
+        """Fallback determinista seleccionando el bot con mayor PnL.
+
+        Se recorre la lista de bots provista en ``cycle_summary`` y se
+        identifica el ``bot_id`` con mayor beneficio acumulado. Este camino
+        es utilizado cuando la llamada al LLM falla o no se dispone de clave
+        de API, evitando que el ciclo quede sin ganador.
+        """
 
         bots = cycle_summary.get("bots", [])
         best_id = None
@@ -160,4 +166,4 @@ class LLMClient:
             "winner_bot_id": int(best_id) if best_id is not None else -1,
             "reason": "max_pnl",
         }
-=======
+
