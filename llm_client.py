@@ -63,6 +63,7 @@ class LLMClient:
                     timeout=20,
                 )
                 reply = resp.choices[0].message.content or ""
+
             except Exception:
                 reply = ""
         try:
@@ -71,7 +72,7 @@ class LLMClient:
         except Exception:
             pass
         return reply
-
+      
     def ask(self, message: str) -> str:
         reply = ""
         if self._openai:

@@ -36,7 +36,6 @@ class Engine(threading.Thread):
         self._last_reasons: List[str] = []
         self._first_call_done: bool = False
         self._last_auto_ts: float = 0.0
-
         self._patch_history: List[tuple[Dict[str, Any], str]] = []
         self._last_patch_code: str = ""
 
