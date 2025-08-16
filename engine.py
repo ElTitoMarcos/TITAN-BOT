@@ -539,6 +539,8 @@ def _log_audit(self, event: str, sym: str, detail: str):
                         self.ui_log(f"[ENGINE {self.name}] Skip LLM: no hay órdenes abiertas")
 
                                 # Autotrade (sin LLM) si hay buenas condiciones
+                extra_reasons: List[str] = []
+                auto_done = False
                 now_ms = time.time()*1000
                 if candidates and (now_ms - self._last_auto_ts) > 1500:
                     top = candidates[0]
@@ -549,6 +551,13 @@ def _log_audit(self, event: str, sym: str, detail: str):
                         # Coloca LIMIT BUY
                         self.execute_actions([{"symbol": sym, "type": "PLACE_LIMIT_BUY", "price": price, "qty_usd": usd}], snapshot)
                         self._last_auto_ts = now_ms
+                        auto_done = True
+                    else:
+                        extra_reasons.append(f"Autotrade omitido {sym}: precio inválido")
+                elif not candidates:
+                    extra_reasons.append("Autotrade omitido: sin candidatos")
+                else:
+                    extra_reasons.append("Autotrade omitido: esperando intervalo mínimo")
 
                 actions: List[Dict[str, Any]] = []
                 greet_msg = ""
@@ -570,11 +579,16 @@ def _log_audit(self, event: str, sym: str, detail: str):
                     actions = llm_out.get("actions", [])
 
                 valid = self.validate_actions(actions, snapshot)
-                if valid:
+                if auto_done:
+                    self._last_reasons = extra_reasons
+                    for r in self._last_reasons:
+                        self.ui_log(f"[ENGINE {self.name}] {r}")
+                elif valid:
                     self.execute_actions(valid, snapshot)
                     self._last_reasons = []
                 else:
                     self._last_reasons = self._compute_reasons(actions, snapshot, candidates, open_count)
+                    self._last_reasons.extend(extra_reasons)
                     for r in self._last_reasons:
                         self.ui_log(f"[ENGINE {self.name}] {r}")
 
