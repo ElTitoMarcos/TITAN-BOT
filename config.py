@@ -17,7 +17,8 @@ class Defaults:
     opportunity_threshold_percent: float = 0.2  # 2*fee por defecto
 
     # Tamaños por modo
-    size_usd_sim: float = 25.0
+    # Tamaño por defecto para operaciones simuladas
+    size_usd_sim: float = 500.0
     size_usd_live: float = 50.0
 
     # LLM / engine
@@ -30,16 +31,21 @@ class Defaults:
 
     # Selección / ranking
     weights: Dict[str, int] = field(default_factory=lambda: {
-        "imbalance": 30,
-        "spread_over_tick_price": 20,
-        "trade_flow": 20,
-        "base_volume": 15,
-        "micro_volatility": 15,
+        "trend_w": 25,
+        "trend_d": 20,
+        "pressure": 15,
+        "flow": 12,
+        "trend_h": 10,
+        "depth": 8,
+        "trend_m": 5,
+        "momentum": 3,
+        "spread": 1,
+        "microvol": 1,
     })
     pct_window: str = "1h"  # "24h"|"1h"|"5m"
 
     # Universo / otros
-    universe_quote: str = "BTC"
+    universe_quote: str = "ALL"
     topN: int = 20  # pares que mostramos al LLM / UI
     log_dir: str = "./logs"
     initial_balance_usd: float = 10000.0
