@@ -317,6 +317,7 @@ class App(tb.Window):
             except Exception:
                 pass
         self.log_append("[API] Claves actualizadas")
+        self._lock_controls(False)
 
     def _on_engine_snapshot(self, snap: Dict[str, Any]):
         """Callback para recibir snapshots del motor."""
