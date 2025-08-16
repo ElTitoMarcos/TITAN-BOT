@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -60,6 +61,7 @@ class SQLiteStorage:
             params.append(cycle)
         with self._lock:
             rows = self.conn.execute(query, params).fetchall()
+
         events = []
         for row in rows:
             payload = json.loads(row["payload_json"]) if row["payload_json"] else None
@@ -105,6 +107,7 @@ class SQLiteStorage:
                 "SELECT bot_id, cycle_id, name, seed_parent, mutations_json FROM bots WHERE bot_id = ?",
                 (bot_id,),
             ).fetchone()
+
         if row is None:
             return None
         return BotConfig(
@@ -157,6 +160,7 @@ class SQLiteStorage:
         query += " ORDER BY cycle_id DESC LIMIT 1"
         with self._lock:
             row = self.conn.execute(query, params).fetchone()
+
         if row is None:
             return None
         return BotStats(
@@ -178,6 +182,7 @@ class SQLiteStorage:
             params.append(cycle)
         with self._lock:
             rows = self.conn.execute(query, params).fetchall()
+
         return [
             BotStats(
                 bot_id=r["bot_id"],
@@ -227,6 +232,7 @@ class SQLiteStorage:
         placeholders = ",".join(["?"] * len(self._ORDER_COLS))
         cols = ",".join(self._ORDER_COLS)
         with self._lock, self.conn:
+
             self.conn.execute(
                 f"INSERT OR REPLACE INTO orders ({cols}) VALUES ({placeholders})",
                 values,
@@ -277,6 +283,7 @@ class SQLiteStorage:
                 "SELECT cycle_id, started_at, finished_at, winner_bot_id, winner_reason FROM cycles WHERE cycle_id = ?",
                 (cycle,),
             ).fetchone()
+
         if row is None:
             return None
         return dict(row)
