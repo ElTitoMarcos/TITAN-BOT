@@ -176,7 +176,8 @@ class Engine(threading.Thread):
 
     def build_snapshot(self) -> Dict[str, Any]:
         universe = [s for s in self.exchange.fetch_universe("BTC") if s.endswith("/BTC")]
-        universe = list(dict.fromkeys(universe))[:200]
+        limit = self.cfg.topN * 3
+        universe = list(dict.fromkeys(universe))[:limit]
         pairs = self.exchange.fetch_top_metrics(universe)
         try:
             self.exchange.ensure_collector([p['symbol'] for p in pairs], interval_ms=800)
@@ -436,6 +437,10 @@ def _log_audit(self, event: str, sym: str, detail: str):
             reasons.append("No hay pares disponibles en el universo */BTC.")
         return reasons
 
+    def _is_ban_error(self, msg: str) -> bool:
+        m = msg.lower()
+        return ("ip banned" in m) or ("way too much request weight" in m) or ("418" in m)
+
     def _should_call_llm(self) -> bool:
         return True
 
@@ -523,6 +528,10 @@ def _log_audit(self, event: str, sym: str, detail: str):
 
             except Exception as e:
                 self._log_audit("ERROR", "-", str(e))
+                if self._is_ban_error(str(e)):
+                    self.ui_log(f"[SECURITY] {e}")
+                    self.stop()
+                    break
 
             time.sleep(0.25)
 

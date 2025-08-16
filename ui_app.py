@@ -91,6 +91,22 @@ class App(tb.Window):
             self._sort_col, self._sort_reverse = col, reverse
             self.tree.heading(col, command=lambda: self._sort_tree(col, not reverse))
 
+    def _handle_rate_limit(self, err: Exception) -> bool:
+        msg = str(err)
+        keywords = ["way too much request weight", "ip banned", "418 i'm a teapot"]
+        if any(k in msg.lower() for k in keywords):
+            self.log_append("[SECURITY] IP ban detectado, deteniendo bots.")
+            if self._engine_sim and self._engine_sim.is_alive():
+                self._engine_sim.stop()
+                self.var_bot_sim.set(False)
+                self.lbl_state_sim.configure(text="SIM: OFF", bootstyle=SECONDARY)
+            if self._engine_live and self._engine_live.is_alive():
+                self._engine_live.stop()
+                self.var_bot_live.set(False)
+                self.lbl_state_live.configure(text="LIVE: OFF", bootstyle=SECONDARY)
+            return True
+        return False
+
     def __init__(self):
         super().__init__(title="AutoBTC - Punto a Punto", themename="cyborg")
         self.geometry("1400x860")
@@ -111,6 +127,7 @@ class App(tb.Window):
         self.metric_vars: Dict[str, tb.BooleanVar] = {}
 
         self._keys_file = os.path.join(os.path.dirname(__file__), ".api_keys.json")
+        self._last_market_refresh: float = 0.0
 
         self._build_ui()
         self._load_saved_keys()
@@ -443,10 +460,15 @@ class App(tb.Window):
             except Exception:
                 pass
         except Exception as e:
-            self.log_append(f"[ENGINE] Warmup error: {e}")
+            if not self._handle_rate_limit(e):
+                self.log_append(f"[ENGINE] Warmup error: {e}")
 
     def _refresh_market_candidates(self):
         try:
+            now = time.time()
+            if now - self._last_market_refresh < 30:
+                return
+            self._last_market_refresh = now
             self._ensure_exchange()
             uni = [s for s in self.exchange.fetch_universe("BTC") if s.endswith("/BTC")][:100]
 
@@ -511,7 +533,8 @@ class App(tb.Window):
                 self._snapshot = {**self._snapshot, "pairs": pairs, "candidates": cands}
             self._refresh_market_table(pairs, cands)
         except Exception as e:
-            self.log_append(f"[ENGINE] Error al refrescar mercado: {e}")
+            if not self._handle_rate_limit(e):
+                self.log_append(f"[ENGINE] Error al refrescar mercado: {e}")
 
     # ------------------- Engine binding -------------------
     def _on_bot_sim(self, *_):
