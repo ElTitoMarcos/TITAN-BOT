@@ -142,7 +142,11 @@ class App(tb.Window):
         # Pestañas principales
         self.notebook = ttk.Notebook(self)
         self.notebook.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=(10,10), pady=(0,8))
-        self.testeos_frame = TesteosFrame(self.notebook, self.on_start_mass_tests, self.on_load_winner_for_sim)
+        self.testeos_frame = TesteosFrame(
+            self.notebook,
+            self.on_toggle_mass_tests,
+            self.on_load_winner_for_sim,
+        )
         self.notebook.add(self.testeos_frame, text="Testeos Masivos")
 
         # Panel inferior izquierdo para órdenes
@@ -209,6 +213,11 @@ class App(tb.Window):
         self.ent_size_live = ttk.Entry(frm_size, textvariable=self.var_size_live, width=14)
         self.ent_size_live.grid(row=1, column=1, sticky="e")
         ttk.Button(frm_size, text="Aplicar tamaño", command=self._apply_sizes).grid(row=0, column=2, rowspan=2, padx=6)
+        self.lbl_min_marker = ttk.Label(frm_size, text="Mínimo Binance: --")
+        self.lbl_min_marker.grid(row=2, column=0, columnspan=2, sticky="w", pady=(4,0))
+        ttk.Button(frm_size, text="Min Binance", command=self._show_min_binance).grid(
+            row=2, column=2, padx=6, pady=(4, 0)
+        )
 
         # API keys
         frm_api = ttk.Labelframe(right, text="Claves API", padding=8)
@@ -298,9 +307,109 @@ class App(tb.Window):
         except Exception:
             pass
 
+    def _confirm_apis(self):
+        """Confirma y guarda las claves API ingresadas en la UI."""
+        self._save_api_keys()
+        key = self.var_bin_key.get().strip()
+        sec = self.var_bin_sec.get().strip()
+        oai = self.var_oai_key.get().strip()
+        try:
+            self._ensure_exchange()
+            self.exchange.set_api_keys(key, sec)
+        except Exception:
+            pass
+        for eng in (self._engine_sim, self._engine_live):
+            try:
+                if eng:
+                    eng.exchange.set_api_keys(key, sec)
+                    eng.llm.set_api_key(oai)
+            except Exception:
+                pass
+        self.log_append("[API] Claves actualizadas")
+        self._lock_controls(False)
+
+    def _on_engine_snapshot(self, snap: Dict[str, Any]):
+        """Callback para recibir snapshots del motor."""
+        self._snapshot = snap
+
+    def _on_bot_sim(self, *_):
+        if self.var_bot_sim.get():
+            if not self._engine_sim or not self._engine_sim.is_alive():
+                self._ensure_exchange()
+                self._engine_sim = Engine(self._on_engine_snapshot, self.log_append, exchange=self.exchange, name="SIM")
+                self._engine_sim.mode = "SIM"
+                self._engine_sim.start()
+            self.lbl_state_sim.configure(text="SIM: ON", bootstyle=SUCCESS)
+        else:
+            if self._engine_sim and self._engine_sim.is_alive():
+                self._engine_sim.stop()
+            self.lbl_state_sim.configure(text="SIM: OFF", bootstyle=SECONDARY)
+
+    def _on_bot_live(self, *_):
+        if self.var_bot_live.get():
+            if not self._engine_live or not self._engine_live.is_alive():
+                self._ensure_exchange()
+                self._engine_live = Engine(self._on_engine_snapshot, self.log_append, exchange=self.exchange, name="LIVE")
+                self._engine_live.mode = "LIVE"
+                self._engine_live.state.live_confirmed = self.state.live_confirmed
+                self._engine_live.start()
+            self.lbl_state_live.configure(text="LIVE: ON", bootstyle=SUCCESS)
+        else:
+            if self._engine_live and self._engine_live.is_alive():
+                self._engine_live.stop()
+            self.lbl_state_live.configure(text="LIVE: OFF", bootstyle=SECONDARY)
+
+    def _on_live_confirm(self, *_):
+        val = bool(self.var_live_confirm.get())
+        self.state.live_confirmed = val
+        if self._engine_live:
+            self._engine_live.state.live_confirmed = val
+        self.log_append(f"[LIVE] Confirmación {'activada' if val else 'desactivada'}")
+
+    def _apply_llm(self):
+        model = self.var_llm_model.get()
+        self.cfg.llm_model = model
+        for eng in (self._engine_sim, self._engine_live):
+            try:
+                if eng:
+                    eng.llm.set_model(model)
+            except Exception:
+                pass
+        self.log_append(f"[LLM] Modelo aplicado: {model}")
+
+    def _send_llm_query(self):
+        query = self.var_llm_query.get().strip()
+        if not query:
+            return
+        llm = None
+        if self._engine_sim:
+            llm = self._engine_sim.llm
+        elif self._engine_live:
+            llm = self._engine_live.llm
+        else:
+            llm = LLMClient(model=self.var_llm_model.get(), api_key=self.var_oai_key.get())
+        resp = ""
+        try:
+            resp = llm.ask(query)
+        except Exception:
+            resp = ""
+        self.txt_llm_resp.delete("1.0", "end")
+        self.txt_llm_resp.insert("end", resp)
+
+    def _revert_patch(self):
+        for eng in (self._engine_sim, self._engine_live):
+            try:
+                if eng:
+                    eng.revert_last_patch()
+            except Exception:
+                pass
+
+    def _apply_winner_live(self):
+        self.log_append("[TEST] Aplicar ganador a LIVE presionado")
+
     # ------------------- Configuración -------------------
     def _apply_sizes(self):
-      
+
         """Aplica los tamaños por operación para SIM y LIVE."""
         try:
             if self._engine_sim:
@@ -313,6 +422,15 @@ class App(tb.Window):
         except Exception:
             pass
 
+    def _show_min_binance(self):
+        """Obtiene y muestra el tamaño mínimo permitido por Binance."""
+        try:
+            self._ensure_exchange()
+            min_usd = self.exchange.global_min_notional_usd()
+            self.lbl_min_marker.configure(text=f"Mínimo Binance: {min_usd:.2f} USDT")
+        except Exception:
+            self.lbl_min_marker.configure(text="Mínimo Binance: --")
+
     def _apply_min_orders(self):
         """Aplica el mínimo de órdenes requerido para la sesión de test."""
         try:
@@ -322,11 +440,14 @@ class App(tb.Window):
             self.log_append("[TEST] Valor inválido para órdenes mínimas")
 
     # ------------------- Testeos masivos -------------------
-    def on_start_mass_tests(self) -> None:
-        """Callback para iniciar los ciclos de testeos masivos."""
-        self.log_append("[TEST] Iniciar Testeos presionado")
-        self.mass_state.current_cycle += 1
-        self.mass_state.save()
+    def on_toggle_mass_tests(self, running: bool) -> None:
+        """Inicia o detiene los ciclos de testeos masivos."""
+        if running:
+            self.log_append("[TEST] Iniciar Testeos presionado")
+            self.mass_state.current_cycle += 1
+            self.mass_state.save()
+        else:
+            self.log_append("[TEST] Testeos detenidos")
 
     def on_load_winner_for_sim(self) -> None:
         """Carga la configuración ganadora en el bot SIM."""

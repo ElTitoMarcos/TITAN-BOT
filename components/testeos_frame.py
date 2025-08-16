@@ -7,10 +7,16 @@ from tkinter import ttk
 class TesteosFrame(ttk.Frame):
     """Frame que muestra y controla los testeos masivos."""
 
-    def __init__(self, parent: ttk.Widget, on_start: Callable[[], None], on_load_winner: Callable[[], None]) -> None:
+    def __init__(
+        self,
+        parent: ttk.Widget,
+        on_toggle: Callable[[bool], None],
+        on_load_winner: Callable[[], None],
+    ) -> None:
         super().__init__(parent, padding=10)
-        self._on_start = on_start
+        self._on_toggle = on_toggle
         self._on_load_winner = on_load_winner
+        self._running = False
         self._build()
 
     def _build(self) -> None:
@@ -18,7 +24,13 @@ class TesteosFrame(ttk.Frame):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
 
-        ttk.Button(self, text="Iniciar Testeos", command=self._on_start).grid(row=0, column=0, sticky="w")
+        self.btn_toggle = ttk.Button(
+            self,
+            text="Iniciar Testeos",
+            bootstyle=SUCCESS,
+            command=self._toggle,
+        )
+        self.btn_toggle.grid(row=0, column=0, sticky="w")
 
         cols = ("bot_id", "cycle", "orders", "pnl", "status", "winner")
         self.tree = ttk.Treeview(self, columns=cols, show="headings", height=10)
@@ -39,3 +51,15 @@ class TesteosFrame(ttk.Frame):
         vsb.grid(row=1, column=1, sticky="ns")
 
         ttk.Button(self, text="Subir Bot Sim", command=self._on_load_winner).grid(row=2, column=0, sticky="w", pady=(8, 0))
+
+    def _toggle(self) -> None:
+        """Alterna el estado de los testeos y actualiza el botón."""
+        self._running = not self._running
+        if self._running:
+            self.btn_toggle.configure(text="Detener Testeos", bootstyle=DANGER)
+        else:
+            self.btn_toggle.configure(text="Iniciar Testeos", bootstyle=SUCCESS)
+        try:
+            self._on_toggle(self._running)
+        except Exception:
+            pass
