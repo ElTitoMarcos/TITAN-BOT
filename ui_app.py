@@ -739,7 +739,14 @@ class App(tb.Window):
         self.txt_info.delete("1.0", "end")
         min_orders = max(1, int(self.var_min_orders.get()))
         llm = self._engine_sim.llm if self._engine_sim else LLMClient(model=self.var_llm_model.get(), api_key=self.var_oai_key.get())
-        self._tester = TestManager(copy.deepcopy(self.cfg), llm, self.log_append, info, min_orders=min_orders)
+        self._tester = TestManager(
+            copy.deepcopy(self.cfg),
+            llm,
+            self.log_append,
+            info,
+            min_orders=min_orders,
+            on_winner=self._apply_winner_cfg,
+        )
         self._tester.start()
         self.btn_tests.configure(text="Detener Testeos")
         self.log_append("[TEST] Ciclo de testeo iniciado")
@@ -752,12 +759,17 @@ class App(tb.Window):
         if not self._tester:
             return
         if self._engine_sim and self._tester.winner_cfg:
-            self._engine_sim.cfg = copy.deepcopy(self._tester.winner_cfg)
-            self.cfg = copy.deepcopy(self._tester.winner_cfg)
-            self.log_append("[TEST] Config ganadora aplicada al bot SIM.")
+            self._apply_winner_cfg(self._tester.winner_cfg)
         self.btn_tests.configure(text="Iniciar Testeos")
         self.log_append("[TEST] Ciclo de testeo finalizado")
         self._tester = None
+
+    def _apply_winner_cfg(self, cfg):
+        """Aplica la configuración ganadora al bot SIM y al estado global."""
+        if self._engine_sim:
+            self._engine_sim.cfg = copy.deepcopy(cfg)
+        self.cfg = copy.deepcopy(cfg)
+        self.log_append("[TEST] Config ganadora aplicada al bot SIM.")
 
     def _apply_winner_live(self):
         if not self._tester or not self._tester.winner_cfg:
