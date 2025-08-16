@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import time
 from datetime import datetime
+
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .models import BotConfig, BotStats
@@ -78,6 +79,7 @@ class BotRunner:
                     "raw_json": json.dumps(sell),
                 }
             )
+
             open_orders.append((buy, sell))
             orders_count += 2
 
@@ -85,6 +87,7 @@ class BotRunner:
             params, open_orders, self.exchange.get_order_book
         )
         for (buy, sell), upd in zip(open_orders, updates):
+
             pnl += upd.get("pnl", 0.0)
             if upd.get("pnl", 0.0) >= 0:
                 wins += 1
@@ -105,6 +108,7 @@ class BotRunner:
                     "raw_json": json.dumps(order),
                 }
                 self.storage.save_order(data)
+
             self.ui_callback({"bot_id": self.config.id, **upd})
 
         runtime_s = int(time.time() - start)
