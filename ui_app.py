@@ -90,8 +90,6 @@ class App(tb.Window):
         self.exchange = None
         self._tester = None
         self.var_min_orders = tb.IntVar(value=50)
-        self.metric_defaults = dict(self.cfg.weights)
-        self.metric_vars: Dict[str, tb.BooleanVar] = {}
 
         self._keys_file = os.path.join(os.path.dirname(__file__), ".api_keys.json")
 
@@ -195,8 +193,7 @@ class App(tb.Window):
         right.columnconfigure(0, weight=1)
         right.rowconfigure(4, weight=0)
         right.rowconfigure(5, weight=1)
-        right.rowconfigure(6, weight=0)
-        right.rowconfigure(7, weight=1)
+        right.rowconfigure(6, weight=1)
 
         ttk.Label(right, text="Ajustes").grid(row=0, column=0, sticky="w", pady=(0,6))
 
@@ -205,16 +202,12 @@ class App(tb.Window):
         frm_size.grid(row=1, column=0, sticky="ew", pady=6)
         self.var_size_sim = tb.DoubleVar(value=self.cfg.size_usd_sim)
         self.var_size_live = tb.DoubleVar(value=self.cfg.size_usd_live)
-        self.var_use_min_live = tb.BooleanVar(value=True)
         ttk.Label(frm_size, text="SIM").grid(row=0, column=0, sticky="w")
         self.ent_size_sim = ttk.Entry(frm_size, textvariable=self.var_size_sim, width=14)
         self.ent_size_sim.grid(row=0, column=1, sticky="e")
-        ttk.Label(frm_size, text="LIVE (mínimo Binance)").grid(row=1, column=0, sticky="w")
-        self.ent_size_live = ttk.Entry(frm_size, textvariable=self.var_size_live, width=14, state="disabled")
+        ttk.Label(frm_size, text="LIVE").grid(row=1, column=0, sticky="w")
+        self.ent_size_live = ttk.Entry(frm_size, textvariable=self.var_size_live, width=14)
         self.ent_size_live.grid(row=1, column=1, sticky="e")
-        ttk.Checkbutton(frm_size, text="Usar mínimo Binance (LIVE)", variable=self.var_use_min_live, style="info.Roundtoggle", command=self._on_toggle_min_live).grid(row=2, column=0, sticky="w")
-        self.lbl_min_marker = ttk.Label(frm_size, text="Mínimo permitido por Binance: --")
-        self.lbl_min_marker.grid(row=3, column=0, columnspan=3, sticky="w", pady=(4,0))
         ttk.Button(frm_size, text="Aplicar tamaño", command=self._apply_sizes).grid(row=0, column=2, rowspan=2, padx=6)
 
         # API keys
@@ -265,29 +258,9 @@ class App(tb.Window):
         ttk.Button(frm_info, text="Revertir patch", command=self._revert_patch).grid(row=3, column=0, sticky="ew", pady=(4,0))
         ttk.Button(frm_info, text="Aplicar a LIVE", command=self._apply_winner_live).grid(row=3, column=1, sticky="ew", pady=(4,0))
 
-        # Métricas de Score
-        frm_met = ttk.Labelframe(right, text="Métricas Score", padding=8)
-        frm_met.grid(row=6, column=0, sticky="ew", pady=6)
-
-        for idx, (key, label) in enumerate([
-            ("trend_w", "Trend semanal"),
-            ("trend_d", "Trend diaria"),
-            ("pressure", "Presión libro"),
-            ("flow", "Flujo órdenes"),
-            ("trend_h", "Trend horas"),
-            ("depth", "Profundidad"),
-            ("trend_m", "Trend minutos"),
-            ("momentum", "Momentum"),
-            ("spread", "Spread"),
-            ("microvol", "Microvol"),
-        ]):
-            var = tb.BooleanVar(value=self.cfg.weights.get(key, 0) > 0)
-            self.metric_vars[key] = var
-            ttk.Checkbutton(frm_met, text=label, variable=var, command=self._apply_metric_weights).grid(row=idx//2, column=idx%2, sticky="w")
-
         # Log
         frm_log = ttk.Labelframe(right, text="Log", padding=8)
-        frm_log.grid(row=7, column=0, sticky="nsew", pady=6)
+        frm_log.grid(row=6, column=0, sticky="nsew", pady=6)
         frm_log.rowconfigure(0, weight=1); frm_log.columnconfigure(0, weight=1)
         self.txt_log = ScrolledText(frm_log, height=6, autohide=True, wrap="none")
         self.txt_log.grid(row=0, column=0, sticky="nsew")
@@ -327,27 +300,18 @@ class App(tb.Window):
 
     # ------------------- Configuración -------------------
     def _apply_sizes(self):
-        # SIM: editable
+      
+        """Aplica los tamaños por operación para SIM y LIVE."""
         try:
             if self._engine_sim:
                 self._engine_sim.cfg.size_usd_sim = float(self.var_size_sim.get())
         except Exception:
             pass
-        # LIVE: mínimo global si toggle
-        if bool(self.var_use_min_live.get()):
-            try:
-                self._ensure_exchange()
-                min_usd = self.exchange.global_min_notional_usd()
-                usd = float(min_usd) + 0.1
-                self.var_size_live.set(round(usd, 2))
-                if self._engine_live:
-                    self._engine_live.cfg.size_usd_live = float(usd)
-                self.ent_size_live.configure(state="disabled")
-                self.lbl_min_marker.configure(text=f"Mínimo permitido por Binance: {min_usd:.2f} USDT")
-            except Exception as e:
-                self.log_append(f"[ENGINE] Error obteniendo mínimo: {e}")
-        else:
-            self.ent_size_live.configure(state="normal")
+        try:
+            if self._engine_live:
+                self._engine_live.cfg.size_usd_live = float(self.var_size_live.get())
+        except Exception:
+            pass
 
     def _apply_min_orders(self):
         """Aplica el mínimo de órdenes requerido para la sesión de test."""
@@ -369,10 +333,6 @@ class App(tb.Window):
         self.log_append("[TEST] Subir Bot Sim presionado")
         self.mass_state.next_bot_id += 1
         self.mass_state.save()
-
-    def _update_min_marker(self):
-        # solo informativo, global ya mostrado
-        pass
 
     # ------------------- Log helpers -------------------
     def log_append(self, msg: str):
