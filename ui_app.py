@@ -10,6 +10,7 @@ from engine import Engine
 from llm_client import LLMClient
 from components.testeos_frame import TesteosFrame
 from state.app_state import AppState as MassTestState
+from orchestrator.supervisor import Supervisor
 
 BADGE_SIM = "🔧SIM"
 BADGE_LIVE = "⚡LIVE"
@@ -90,6 +91,9 @@ class App(tb.Window):
 
         self._snapshot: Dict[str, Any] = {}
         self._log_queue: "queue.Queue[str]" = queue.Queue()
+        self._event_queue: "queue.Queue" = queue.Queue()
+        self._supervisor = Supervisor()
+        self._supervisor.stream_events(lambda ev: self._event_queue.put(ev))
         self._engine_sim: Engine | None = None
         self._engine_live: Engine | None = None
         self.exchange = None
@@ -102,6 +106,7 @@ class App(tb.Window):
         self._load_saved_keys()
         self._lock_controls(True)
         self.after(250, self._poll_log_queue)
+        self.after(250, self._poll_event_queue)
         self.after(4000, self._tick_ui_refresh)
         self.after(3000, self._tick_open_orders)
         self.after(3000, self._tick_closed_orders)
@@ -473,8 +478,10 @@ class App(tb.Window):
             self.log_append("[TEST] Iniciar Testeos presionado")
             self.mass_state.current_cycle += 1
             self.mass_state.save()
+            self._supervisor.start_mass_tests()
         else:
             self.log_append("[TEST] Testeos detenidos")
+            self._supervisor.stop_mass_tests()
 
     def on_load_winner_for_sim(self) -> None:
         """Carga la configuración ganadora en el bot SIM."""
@@ -495,6 +502,15 @@ class App(tb.Window):
         except queue.Empty:
             pass
         self.after(200, self._poll_log_queue)
+
+    def _poll_event_queue(self):
+        try:
+            while True:
+                ev = self._event_queue.get_nowait()
+                self.testeos_frame.handle_event(ev)
+        except queue.Empty:
+            pass
+        self.after(200, self._poll_event_queue)
 
     # ------------------- UI refresh -------------------
     def _tick_balance_refresh(self):

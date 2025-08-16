@@ -4,6 +4,8 @@ import ttkbootstrap as tb
 from ttkbootstrap.constants import *
 from tkinter import ttk
 
+from orchestrator.models import SupervisorEvent
+
 class TesteosFrame(ttk.Frame):
     """Frame que muestra y controla los testeos masivos."""
 
@@ -61,5 +63,43 @@ class TesteosFrame(ttk.Frame):
             self.btn_toggle.configure(text="Iniciar Testeos", bootstyle=SUCCESS)
         try:
             self._on_toggle(self._running)
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------
+    def handle_event(self, event: SupervisorEvent) -> None:
+        """Actualiza la tabla según los eventos del supervisor."""
+        try:
+            if event.message == "cycle_start":
+                for item in self.tree.get_children():
+                    self.tree.delete(item)
+            elif event.message == "bot_start":
+                self.tree.insert(
+                    "",
+                    "end",
+                    iid=str(event.bot_id),
+                    values=(event.bot_id, event.cycle, "", "", "RUNNING", ""),
+                )
+            elif event.message == "bot_finished" and event.payload:
+                stats = event.payload.get("stats", {})
+                pnl = stats.get("pnl", 0.0)
+                orders = stats.get("orders", 0)
+                self.tree.item(
+                    str(event.bot_id),
+                    values=(
+                        event.bot_id,
+                        event.cycle,
+                        orders,
+                        f"{pnl:+.2f}",
+                        "DONE",
+                        "",
+                    ),
+                )
+            elif event.message == "cycle_winner" and event.payload:
+                winner_id = event.payload.get("winner_id")
+                if winner_id is not None and self.tree.exists(str(winner_id)):
+                    vals = list(self.tree.item(str(winner_id), "values"))
+                    vals[-1] = "✅"
+                    self.tree.item(str(winner_id), values=vals)
         except Exception:
             pass
