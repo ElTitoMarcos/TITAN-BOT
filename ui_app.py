@@ -300,6 +300,7 @@ class App(tb.Window):
 
     # ------------------- Configuración -------------------
     def _apply_sizes(self):
+      
         """Aplica los tamaños por operación para SIM y LIVE."""
         try:
             if self._engine_sim:
