@@ -37,6 +37,7 @@ class Engine(threading.Thread):
         self._last_auto_ts: float = 0.0
         self._patch_history: List[tuple[Dict[str, Any], str]] = []
         self._last_patch_code: str = ""
+        self.order_hook: Callable[[Dict[str, Any]], None] = lambda order: None
 
         os.makedirs(self.cfg.log_dir, exist_ok=True)
         self._audit_file = os.path.join(self.cfg.log_dir, "audit.csv")
@@ -51,6 +52,14 @@ class Engine(threading.Thread):
 
     def is_stopped(self) -> bool:
         return self._stop_event.is_set()
+
+    def set_order_hook(self, hook: Callable[[Dict[str, Any]], None]) -> None:
+        """Registra un callback para eventos de órdenes."""
+        self.order_hook = hook
+
+    def order_book(self, symbols: List[str]) -> Dict[str, Dict[str, Any]]:
+        """Expone snapshots de libro de órdenes para los símbolos dados."""
+        return self.exchange.ws.snapshot_for(symbols)
 
     # --------------------- Patches LLM ---------------------
     def apply_llm_patch(self, code: str):
@@ -106,6 +115,10 @@ class Engine(threading.Thread):
             "ts": now_ms,
             "eta": eta,
         }
+        try:
+            self.order_hook(self._open_orders[oid])
+        except Exception:
+            pass
         return oid
 
     def _try_fill_sim_orders(self, snapshot: Dict[str, Any]):
@@ -175,6 +188,10 @@ class Engine(threading.Thread):
         self.ui_log(
             f"[ENGINE {self.name}] FILL {side.upper()} {sym} {qty_usd:.2f} @ {fill_price}"
         )
+        try:
+            self.order_hook(trade)
+        except Exception:
+            pass
 
     def _sim_mark_to_market(self, pairs: List[Dict[str, Any]]):
         pnl_usd = 0.0
