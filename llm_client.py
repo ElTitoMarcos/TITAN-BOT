@@ -63,6 +63,7 @@ class LLMClient:
                     timeout=20,
                 )
                 reply = resp.choices[0].message.content or ""
+
             except Exception:
                 reply = ""
         try:

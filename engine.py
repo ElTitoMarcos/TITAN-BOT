@@ -36,7 +36,6 @@ class Engine(threading.Thread):
         self._last_reasons: List[str] = []
         self._first_call_done: bool = False
         self._last_auto_ts: float = 0.0
-
         self._patch_history: List[tuple[Dict[str, Any], str]] = []
         self._last_patch_code: str = ""
 
@@ -53,6 +52,35 @@ class Engine(threading.Thread):
 
     def is_stopped(self) -> bool:
         return self._stop_event.is_set()
+
+    # --------------------- Patches LLM ---------------------
+    def apply_llm_patch(self, code: str):
+        backup: Dict[str, Any] = {}
+        local_ns: Dict[str, Any] = {}
+        try:
+            exec(code, {}, local_ns)
+            for k, v in local_ns.items():
+                backup[k] = getattr(self, k, None)
+                setattr(self, k, v)
+            self._patch_history.append((backup, code))
+            self._last_patch_code = code
+            self.ui_log(f"[LLM PATCH] aplicado: {list(local_ns.keys())}")
+        except Exception as e:
+            self.ui_log(f"[LLM PATCH] error: {e}")
+
+    def revert_last_patch(self):
+        if not self._patch_history:
+            return
+        backup, _ = self._patch_history.pop()
+        for k, v in backup.items():
+            if v is None:
+                try:
+                    delattr(self, k)
+                except Exception:
+                    pass
+            else:
+                setattr(self, k, v)
+        self.ui_log("[LLM PATCH] revertido")
 
     # --------------------- Patches LLM ---------------------
     def apply_llm_patch(self, code: str):
@@ -170,6 +198,7 @@ class Engine(threading.Thread):
     # --------------------- Núcleo ---------------------
     def _find_candidates(self, snapshot: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Marca todos los pares BTC como candidatos."""
+
         cands: List[Dict[str, Any]] = []
         for p in snapshot.get("pairs", []):
             p["is_candidate"] = True
@@ -255,6 +284,7 @@ class Engine(threading.Thread):
         self.ui_log(
             f"[ENGINE {self.name}] Evaluados {len(pairs)} pares; {len(candidates)} candidatos"
         )
+
         snap = {
             "ts": int(time.time()*1000),
             "global_state": {
