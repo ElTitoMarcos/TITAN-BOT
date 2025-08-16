@@ -7,6 +7,7 @@ from typing import Dict, Any, List
 from config import UIColors, Defaults, AppState
 from engine import Engine
 from scoring import compute_score
+from test_manager import TestManager
 
 BADGE_SIM = "🔧SIM"
 BADGE_LIVE = "⚡LIVE"
@@ -103,6 +104,7 @@ class App(tb.Window):
         self._engine_sim: Engine | None = None
         self._engine_live: Engine | None = None
         self.exchange = None
+        self._tester: TestManager | None = None
 
         self.metric_defaults = dict(self.cfg.weights)
         self.metric_vars: Dict[str, tb.BooleanVar] = {}
@@ -673,13 +675,31 @@ class App(tb.Window):
         threading.Thread(target=self._refresh_market_candidates, daemon=True).start()
 
     def _start_tests(self):
-        self.log_append("[TEST] Iniciando ciclo de testeo (pendiente de implementación)")
-        self.txt_info.insert("end", "Inicio de testeos...\n")
+        if not self._engine_sim:
+            self.log_append("[TEST] Motor SIM no iniciado")
+            return
+        if self._tester and self._tester.is_alive():
+            self.log_append("[TEST] Ciclo de testeo ya en ejecución")
+            return
+        def info(msg: str):
+            def upd():
+                self.txt_info.insert("end", msg + "\n")
+                self.txt_info.see("end")
+            self.after(0, upd)
+        self.txt_info.delete("1.0", "end")
+        self._tester = TestManager(self._engine_sim.cfg, self._engine_sim.llm, self.log_append, info)
+        self._tester.start()
+        self.log_append("[TEST] Ciclo de testeo iniciado")
 
     def _apply_winner_live(self):
-        self._apply_patch_live()
-        self.log_append("[TEST] Aplicando versión ganadora a LIVE (pendiente de implementación)")
-        self.txt_info.insert("end", "Aplicando versión ganadora a LIVE...\n")
+        if not self._tester or self._tester.winner_thr is None:
+            self.log_append("[TEST] No hay versión ganadora disponible")
+            return
+        if not self._engine_live:
+            self.log_append("[TEST] Motor LIVE no iniciado")
+            return
+        self._engine_live.cfg.opportunity_threshold_percent = self._tester.winner_thr
+        self.log_append(f"[TEST] Umbral LIVE actualizado a {self._tester.winner_thr:.4f}")
 
     def _send_llm_query(self):
         q = self.var_llm_query.get().strip()

@@ -41,3 +41,5 @@ python .\main.py
 - LLM: solo **Modelo**.
 - Gating LLM: no se llama si no hay órdenes abiertas ni candidatos (score/edge/%).
 - Razones más explícitas al no operar.
+- Botón **Iniciar Testeos** ejecuta 10 variaciones del umbral de oportunidad (50 compras y 50 ventas cada una),
+  envía los resultados al LLM para elegir la más prometedora y permite aplicar la ganadora al modo LIVE.
