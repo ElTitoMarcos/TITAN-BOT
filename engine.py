@@ -32,7 +32,6 @@ class Engine(threading.Thread):
         self._open_orders: Dict[str, Dict[str, Any]] = {}
         self._closed_orders: List[Dict[str, Any]] = []
         self._positions: Dict[str, Dict[str, Any]] = {}
-        self._last_loop_ts: float = 0.0
         self._last_reasons: List[str] = []
         self._first_call_done: bool = False
         self._last_auto_ts: float = 0.0
@@ -438,11 +437,7 @@ def _log_audit(self, event: str, sym: str, detail: str):
         return reasons
 
     def _should_call_llm(self) -> bool:
-        now = time.monotonic()
-        if (now - self._last_loop_ts) * 1000.0 >= self.cfg.llm_call_interval_ms:
-            self._last_loop_ts = now
-            return True
-        return False
+        return True
 
     def run(self):
         try:
@@ -466,7 +461,6 @@ def _log_audit(self, event: str, sym: str, detail: str):
                 if not self._first_call_done and (open_count > 0 or len(candidates) > 0):
                     do_call = True
                     self._first_call_done = True
-                    self._last_loop_ts = time.monotonic()
 
                 if not do_call and (open_count > 0 or len(candidates) > 0):
                     do_call = self._should_call_llm()

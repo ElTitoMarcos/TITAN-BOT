@@ -7,6 +7,7 @@ from typing import Dict, Any, List
 from config import UIColors, Defaults, AppState
 from engine import Engine
 from scoring import compute_score
+from test_manager import TestManager
 
 BADGE_SIM = "🔧SIM"
 BADGE_LIVE = "⚡LIVE"
@@ -98,10 +99,12 @@ class App(tb.Window):
         self.cfg = Defaults()
         self.state = AppState()
         self._snapshot: Dict[str, Any] = {}
+        self._last_pair_values: Dict[str, Dict[str, float]] = {}
         self._log_queue: "queue.Queue[str]" = queue.Queue()
         self._engine_sim: Engine | None = None
         self._engine_live: Engine | None = None
         self.exchange = None
+        self._tester: TestManager | None = None
 
         self.metric_defaults = dict(self.cfg.weights)
         self.metric_vars: Dict[str, tb.BooleanVar] = {}
@@ -297,12 +300,9 @@ class App(tb.Window):
         frm_llm = ttk.Labelframe(right, text="LLM (decisor)", padding=8)
         frm_llm.grid(row=3, column=0, sticky="ew", pady=6)
         self.var_llm_model = tb.StringVar(value=self.cfg.llm_model)
-        self.var_llm_secs = tb.IntVar(value=max(1, int(self.cfg.llm_call_interval_ms/1000)))
         ttk.Label(frm_llm, text="Modelo").grid(row=0, column=0, sticky="w")
         ttk.Combobox(frm_llm, textvariable=self.var_llm_model, values=["gpt-4o","gpt-4o-mini","gpt-4.1","gpt-4.1-mini"], width=14, state="readonly").grid(row=0, column=1, sticky="e")
-        ttk.Label(frm_llm, text="Segundos entre llamadas").grid(row=1, column=0, sticky="w")
-        ttk.Entry(frm_llm, textvariable=self.var_llm_secs, width=14).grid(row=1, column=1, sticky="e")
-        ttk.Button(frm_llm, text="Aplicar LLM", command=self._apply_llm).grid(row=0, column=2, rowspan=2, padx=6)
+        ttk.Button(frm_llm, text="Aplicar LLM", command=self._apply_llm).grid(row=0, column=2, padx=6)
 
         # Consulta LLM
         frm_llm_manual = ttk.Labelframe(right, text="Consulta LLM", padding=8)
@@ -321,8 +321,9 @@ class App(tb.Window):
         frm_info.rowconfigure(0, weight=1); frm_info.columnconfigure(0, weight=1); frm_info.columnconfigure(1, weight=1)
         self.txt_info = ScrolledText(frm_info, height=6, autohide=True, wrap="word")
         self.txt_info.grid(row=0, column=0, columnspan=2, sticky="nsew")
-        ttk.Button(frm_info, text="Revertir patch", command=self._revert_patch).grid(row=1, column=0, sticky="ew", pady=(4,0))
-        ttk.Button(frm_info, text="Patch a LIVE", command=self._apply_patch_live).grid(row=1, column=1, sticky="ew", pady=(4,0))
+        ttk.Button(frm_info, text="Iniciar Testeos", command=self._start_tests).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(4,0))
+        ttk.Button(frm_info, text="Revertir patch", command=self._revert_patch).grid(row=2, column=0, sticky="ew", pady=(4,0))
+        ttk.Button(frm_info, text="Aplicar a LIVE", command=self._apply_winner_live).grid(row=2, column=1, sticky="ew", pady=(4,0))
 
         # Métricas de Score
         frm_met = ttk.Labelframe(right, text="Métricas Score", padding=8)
@@ -554,8 +555,6 @@ class App(tb.Window):
         self._engine_sim.cfg.size_usd_sim = float(self.var_size_sim.get())
         # LLM
         self._engine_sim.llm.set_model(self.var_llm_model.get())
-        secs = max(1, int(self.var_llm_secs.get()))
-        self._engine_sim.cfg.llm_call_interval_ms = secs * 1000
         self._engine_sim.start()
 
     def _start_engine_live(self):
@@ -584,8 +583,6 @@ class App(tb.Window):
                 pass
         # LLM
         self._engine_live.llm.set_model(self.var_llm_model.get())
-        secs = max(1, int(self.var_llm_secs.get()))
-        self._engine_live.cfg.llm_call_interval_ms = secs * 1000
         # Confirm gate
         self._engine_live.state.live_confirmed = bool(self.var_live_confirm.get())
         self._engine_live.start()
@@ -664,14 +661,8 @@ class App(tb.Window):
     def _apply_llm(self):
         if self._engine_sim:
             self._engine_sim.llm.set_model(self.var_llm_model.get())
-            secs = max(1, int(self.var_llm_secs.get()))
-            self._engine_sim.cfg.llm_call_interval_ms = secs * 1000
-            self._engine_sim._last_loop_ts = time.monotonic()
         if self._engine_live:
             self._engine_live.llm.set_model(self.var_llm_model.get())
-            secs = max(1, int(self.var_llm_secs.get()))
-            self._engine_live.cfg.llm_call_interval_ms = secs * 1000
-            self._engine_live._last_loop_ts = time.monotonic()
         self.log_append("[LLM] Configuración aplicada.")
 
     def _apply_metric_weights(self):
@@ -682,6 +673,33 @@ class App(tb.Window):
         if self._engine_live:
             self._engine_live.cfg.weights = dict(self.cfg.weights)
         threading.Thread(target=self._refresh_market_candidates, daemon=True).start()
+
+    def _start_tests(self):
+        if not self._engine_sim:
+            self.log_append("[TEST] Motor SIM no iniciado")
+            return
+        if self._tester and self._tester.is_alive():
+            self.log_append("[TEST] Ciclo de testeo ya en ejecución")
+            return
+        def info(msg: str):
+            def upd():
+                self.txt_info.insert("end", msg + "\n")
+                self.txt_info.see("end")
+            self.after(0, upd)
+        self.txt_info.delete("1.0", "end")
+        self._tester = TestManager(self._engine_sim.cfg, self._engine_sim.llm, self.log_append, info)
+        self._tester.start()
+        self.log_append("[TEST] Ciclo de testeo iniciado")
+
+    def _apply_winner_live(self):
+        if not self._tester or self._tester.winner_thr is None:
+            self.log_append("[TEST] No hay versión ganadora disponible")
+            return
+        if not self._engine_live:
+            self.log_append("[TEST] Motor LIVE no iniciado")
+            return
+        self._engine_live.cfg.opportunity_threshold_percent = self._tester.winner_thr
+        self.log_append(f"[TEST] Umbral LIVE actualizado a {self._tester.winner_thr:.4f}")
 
     def _send_llm_query(self):
         q = self.var_llm_query.get().strip()
@@ -828,23 +846,47 @@ class App(tb.Window):
         pairs_sorted = sorted(pairs, key=lambda p: p.get("score", 0.0), reverse=True)
         for p in pairs_sorted:
             sym = p.get("symbol", "")
+            cache = self._last_pair_values.setdefault(sym, {})
+
+            def _nz(field: str) -> float:
+                val = float(p.get(field, 0.0) or 0.0)
+                if val != 0.0:
+                    cache[field] = val
+                else:
+                    val = float(cache.get(field, 0.0))
+                return val
+
+            score = _nz('score')
+            pct = _nz('pct_change_window')
+            mid = _nz('mid')
+            trend_w = _nz('trend_w')
+            trend_d = _nz('trend_d')
+            trend_h = _nz('trend_h')
+            trend_m = _nz('trend_m')
+            pressure = _nz('pressure')
+            flow = _nz('flow')
+            depth_buy = _nz('depth_buy')
+            depth_sell = _nz('depth_sell')
+            momentum = _nz('momentum')
+            spread_abs = _nz('spread_abs')
+            micro_vol = _nz('micro_volatility')
 
             values = (
                 sym,
-                f"{p.get('score',0.0):.1f}",
-                f"{p.get('pct_change_window',0.0):+.2f}",
-                self._fmt_sats(p.get('mid',0.0)),
-                f"{p.get('trend_w',0.0):+.2f}",
-                f"{p.get('trend_d',0.0):+.2f}",
-                f"{p.get('trend_h',0.0):+.2f}",
-                f"{p.get('trend_m',0.0):+.2f}",
-                f"{p.get('pressure',0.0):.2f}",
-                f"{p.get('flow',0.0):.2f}",
-                f"{p.get('depth_buy',0.0):.2f}",
-                f"{p.get('depth_sell',0.0):.2f}",
-                f"{p.get('momentum',0.0):.2f}",
-                f"{p.get('spread_abs',0.0):.8f}",
-                f"{p.get('micro_volatility',0.0):.4f}",
+                f"{score:.1f}",
+                f"{pct:+.2f}",
+                self._fmt_sats(mid),
+                f"{trend_w:+.2f}",
+                f"{trend_d:+.2f}",
+                f"{trend_h:+.2f}",
+                f"{trend_m:+.2f}",
+                f"{pressure:.2f}",
+                f"{flow:.2f}",
+                f"{depth_buy:.2f}",
+                f"{depth_sell:.2f}",
+                f"{momentum:.2f}",
+                f"{spread_abs:.8f}",
+                f"{micro_vol:.4f}",
             )
             item = existing_rows.pop(sym, None)
             if item:
