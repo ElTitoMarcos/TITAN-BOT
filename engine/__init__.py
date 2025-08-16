@@ -38,7 +38,6 @@ def create_engine(
         engine.set_order_hook(on_order)
     return engine
 
-
 def load_sim_config(mutations: Dict[str, Any]) -> Engine:
     """Create a SIM engine applying strategy mutations."""
     params = map_mutations(mutations)
