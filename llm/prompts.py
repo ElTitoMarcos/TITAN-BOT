@@ -35,3 +35,4 @@ Tarea: Elige UN ganador priorizando PNL y estabilidad (menor varianza y menos ti
 { "winner_bot_id": <int>, "reason": "<breve explicación>" }
 El JSON debe ser parseable. Nada más.
 """
+=======

@@ -108,6 +108,14 @@ class Supervisor:
                     "winner_reason": winner_reason,
                 },
             )
+            self.storage.save_cycle_summary(
+                cycle,
+                {
+                    "finished_at": datetime.utcnow().isoformat(),
+                    "winner_bot_id": winner_id,
+                    "winner_reason": "pnl",
+                },
+            )
             self.spawn_next_generation_from_winner(winner_cfg)
             cycle += 1
         self._running = False
