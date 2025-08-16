@@ -82,29 +82,48 @@ class Engine(threading.Thread):
         self.ui_log("[LLM PATCH] revertido")
 
     # --------------------- Helpers simulación ---------------------
-    def _sim_queue_limit(self, sym: str, price: float, qty_usd: float, side: str) -> str:
+    def _sim_queue_limit(self, sym: str, price: float, qty_usd: float, side: str, par: Dict[str, Any] | None = None) -> str:
+        """Coloca una orden límite SIM calculando un tiempo estimado de llenado."""
+        now_ms = int(time.time() * 1000)
+        qty_base = qty_usd / max(1e-12, price)
+        top_qty = 0.0
+        flow_ratio = 0.5
+        if par:
+            top_qty = par.get("ask_top_qty", 0.0) if side == "buy" else par.get("bid_top_qty", 0.0)
+            flow_ratio = par.get("trade_flow", {}).get("buy_ratio", 0.5)
+        pressure = (1.0 - flow_ratio) if side == "buy" else flow_ratio
+        pressure = max(0.1, pressure)
+        ratio = qty_base / max(top_qty, 1e-8) if top_qty else 1.0
+        eta = now_ms + int(1000 * (1.0 + ratio / pressure))
         oid = f"SIM-{uuid.uuid4().hex[:8].upper()}"
         self._open_orders[oid] = {
-            "id": oid, "symbol": sym, "price": price, "qty_usd": qty_usd,
-            "side": side, "mode": "SIM", "ts": int(time.time()*1000)
+            "id": oid,
+            "symbol": sym,
+            "price": price,
+            "qty_usd": qty_usd,
+            "side": side,
+            "mode": "SIM",
+            "ts": now_ms,
+            "eta": eta,
         }
         return oid
 
     def _try_fill_sim_orders(self, snapshot: Dict[str, Any]):
-        # Revisa órdenes SIM y llena si cruza best bid/ask
+        # Revisa órdenes SIM y llena si cruza best bid/ask y llega su ETA
+        now_ms = time.time() * 1000
         pairs = snapshot.get("pairs", [])
-        to_close = []
+        to_close: List[str] = []
         for oid, o in list(self._open_orders.items()):
             if o.get("mode") != "SIM":
                 continue
             sym = o["symbol"]
-            par = next((p for p in pairs if p.get("symbol")==sym), None)
+            par = next((p for p in pairs if p.get("symbol") == sym), None)
             if not par:
                 continue
             best_ask = par.get("best_ask", 0.0)
             best_bid = par.get("best_bid", 0.0)
+            eta = float(o.get("eta", 0.0))
             if o["side"] == "buy":
-                # Cancel if order price is not the nearest buy to best ask
                 if best_bid and o["price"] < best_bid:
                     self._open_orders.pop(oid, None)
                     self._log_audit("CANCEL", sym, "buy not at top bid")
@@ -112,18 +131,21 @@ class Engine(threading.Thread):
                 bid_qty = par.get("bid_top_qty", 0.0)
                 ask_qty = par.get("ask_top_qty", 0.0)
                 total_qty = bid_qty + ask_qty
-                if total_qty > 0:
-                    if bid_qty <= 0.1 * total_qty:
-                        self._open_orders.pop(oid, None)
-                        self._log_audit("CANCEL", sym, "bid support <=10%")
-                        continue
-                    # if bid_qty >=60% we simply continue monitoring
-                if best_ask and o["price"] >= best_ask:
+                if total_qty > 0 and bid_qty <= 0.1 * total_qty:
+                    self._open_orders.pop(oid, None)
+                    self._log_audit("CANCEL", sym, "bid support <=10%")
+                    continue
+                if best_ask and o["price"] >= best_ask and now_ms >= eta:
                     self._register_fill(o, fill_price=best_ask)
                     to_close.append(oid)
-            elif o["side"] == "sell" and best_bid and o["price"] <= best_bid:
-                self._register_fill(o, fill_price=best_bid)
-                to_close.append(oid)
+            elif o["side"] == "sell":
+                if best_ask and o["price"] > best_ask:
+                    self._open_orders.pop(oid, None)
+                    self._log_audit("CANCEL", sym, "sell not at top ask")
+                    continue
+                if best_bid and o["price"] <= best_bid and now_ms >= eta:
+                    self._register_fill(o, fill_price=best_bid)
+                    to_close.append(oid)
         for oid in to_close:
             self._open_orders.pop(oid, None)
 
@@ -176,7 +198,8 @@ class Engine(threading.Thread):
 
     def build_snapshot(self) -> Dict[str, Any]:
         universe = [s for s in self.exchange.fetch_universe("BTC") if s.endswith("/BTC")]
-        universe = list(dict.fromkeys(universe))[:200]
+        limit = self.cfg.topN * 3
+        universe = list(dict.fromkeys(universe))[:limit]
         pairs = self.exchange.fetch_top_metrics(universe)
         try:
             self.exchange.ensure_collector([p['symbol'] for p in pairs], interval_ms=800)
@@ -304,10 +327,11 @@ class Engine(threading.Thread):
             t = a.get("type", "")
             price = float(a.get("price", 0.0) or 0.0)
             qty_usd = float(a.get("qty_usd", 0.0) or 0.0)
+            par = next((p for p in snapshot["pairs"] if p.get("symbol")==sym), {})
 
             if t == "PLACE_LIMIT_BUY":
                 if self.mode == "SIM":
-                    oid = self._sim_queue_limit(sym, price, qty_usd, side="buy")
+                    oid = self._sim_queue_limit(sym, price, qty_usd, side="buy", par=par)
                     self._log_audit("NEW", sym, f"SIM LIMIT BUY {qty_usd:.2f} USD @ {price} (oid {oid})")
                 elif self.mode == "LIVE":
                     if not (self.state.live_confirmed and self.exchange.is_live_ready()):
@@ -327,7 +351,7 @@ class Engine(threading.Thread):
 
             elif t == "PLACE_LIMIT_SELL":
                 if self.mode == "SIM":
-                    oid = self._sim_queue_limit(sym, price, qty_usd, side="sell")
+                    oid = self._sim_queue_limit(sym, price, qty_usd, side="sell", par=par)
                     self._log_audit("NEW", sym, f"SIM LIMIT SELL {qty_usd:.2f} USD @ {price} (oid {oid})")
                 elif self.mode == "LIVE":
                     if not (self.state.live_confirmed and self.exchange.is_live_ready()):
@@ -436,6 +460,10 @@ def _log_audit(self, event: str, sym: str, detail: str):
             reasons.append("No hay pares disponibles en el universo */BTC.")
         return reasons
 
+    def _is_ban_error(self, msg: str) -> bool:
+        m = msg.lower()
+        return ("ip banned" in m) or ("way too much request weight" in m) or ("418" in m)
+
     def _should_call_llm(self) -> bool:
         return True
 
@@ -523,6 +551,10 @@ def _log_audit(self, event: str, sym: str, detail: str):
 
             except Exception as e:
                 self._log_audit("ERROR", "-", str(e))
+                if self._is_ban_error(str(e)):
+                    self.ui_log(f"[SECURITY] {e}")
+                    self.stop()
+                    break
 
             time.sleep(0.25)
 
