@@ -1,4 +1,4 @@
-import threading, time, copy, json
+import threading, time, copy, json, os
 from typing import Callable, List, Dict, Optional, Any
 from engine import Engine
 
@@ -50,6 +50,10 @@ class TestManager(threading.Thread):
                     "description": f"thr={thr:.4f}",
                     "changes": {"opportunity_threshold_percent": thr},
                 })
+
+        self.info("Variantes generadas:")
+        for v in variants:
+            self.info(f"Bot {v.get('id')}: cambios {json.dumps(v.get('changes', {}))}")
         for v in variants:
             if self._stop.is_set():
                 break
@@ -59,7 +63,12 @@ class TestManager(threading.Thread):
                     setattr(cfg_copy, k, val)
                 except Exception:
                     pass
-            eng = Engine(ui_push_snapshot=lambda _: None, ui_log=self.log, name=f"TEST-{v.get('id')}")
+            self.info(f"Iniciando Bot {v.get('id')}: {v.get('description','')}")
+            def bot_log(msg: str, bot_id=v.get('id')):
+                if any(tag in msg for tag in ("Orden", "FILL")):
+                    self.info(f"Bot {bot_id}: {msg}")
+                self.log(f"[TEST-{bot_id}] {msg}")
+            eng = Engine(ui_push_snapshot=lambda _: None, ui_log=bot_log, name=f"TEST-{v.get('id')}")
             eng.cfg = cfg_copy
             eng.mode = "SIM"
             eng.llm = self.llm
@@ -75,6 +84,15 @@ class TestManager(threading.Thread):
                 eng.join(timeout=5)
             except Exception:
                 pass
+            log_dir = os.path.join("logs", "tests")
+            os.makedirs(log_dir, exist_ok=True)
+            with open(os.path.join(log_dir, f"bot_{v.get('id')}_orders.jsonl"), "w", encoding="utf-8") as f:
+                for tr in eng._closed_orders:
+                    json.dump(tr, f)
+                    f.write("\n")
+                    self.info(
+                        f"Bot {v.get('id')}: {tr.get('side')} {tr.get('symbol')} {tr.get('qty_usd',0):.2f}USD @ {tr.get('price',0):.8f}"
+                    )
             desc = v.get("description", "")
             self.info(f"Bot {v.get('id')}: {desc} -> pnl {v['pnl']:.2f}")
             self.history.append(v)
@@ -111,3 +129,7 @@ class TestManager(threading.Thread):
         self.log(
             f"[TEST] Ganadora ciclo actual: Bot {winner['id']} changes={winner.get('changes')}"
         )
+        summary_dir = os.path.join("logs", "tests")
+        os.makedirs(summary_dir, exist_ok=True)
+        with open(os.path.join(summary_dir, "summary.json"), "w", encoding="utf-8") as f:
+            json.dump(self.history, f, indent=2)
