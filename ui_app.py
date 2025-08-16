@@ -142,7 +142,11 @@ class App(tb.Window):
         # Pestañas principales
         self.notebook = ttk.Notebook(self)
         self.notebook.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=(10,10), pady=(0,8))
-        self.testeos_frame = TesteosFrame(self.notebook, self.on_start_mass_tests, self.on_load_winner_for_sim)
+        self.testeos_frame = TesteosFrame(
+            self.notebook,
+            self.on_toggle_mass_tests,
+            self.on_load_winner_for_sim,
+        )
         self.notebook.add(self.testeos_frame, text="Testeos Masivos")
 
         # Panel inferior izquierdo para órdenes
@@ -209,6 +213,11 @@ class App(tb.Window):
         self.ent_size_live = ttk.Entry(frm_size, textvariable=self.var_size_live, width=14)
         self.ent_size_live.grid(row=1, column=1, sticky="e")
         ttk.Button(frm_size, text="Aplicar tamaño", command=self._apply_sizes).grid(row=0, column=2, rowspan=2, padx=6)
+        self.lbl_min_marker = ttk.Label(frm_size, text="Mínimo Binance: --")
+        self.lbl_min_marker.grid(row=2, column=0, columnspan=2, sticky="w", pady=(4,0))
+        ttk.Button(frm_size, text="Min Binance", command=self._show_min_binance).grid(
+            row=2, column=2, padx=6, pady=(4, 0)
+        )
 
         # API keys
         frm_api = ttk.Labelframe(right, text="Claves API", padding=8)
@@ -400,7 +409,7 @@ class App(tb.Window):
 
     # ------------------- Configuración -------------------
     def _apply_sizes(self):
-      
+
         """Aplica los tamaños por operación para SIM y LIVE."""
         try:
             if self._engine_sim:
@@ -413,6 +422,15 @@ class App(tb.Window):
         except Exception:
             pass
 
+    def _show_min_binance(self):
+        """Obtiene y muestra el tamaño mínimo permitido por Binance."""
+        try:
+            self._ensure_exchange()
+            min_usd = self.exchange.global_min_notional_usd()
+            self.lbl_min_marker.configure(text=f"Mínimo Binance: {min_usd:.2f} USDT")
+        except Exception:
+            self.lbl_min_marker.configure(text="Mínimo Binance: --")
+
     def _apply_min_orders(self):
         """Aplica el mínimo de órdenes requerido para la sesión de test."""
         try:
@@ -422,11 +440,14 @@ class App(tb.Window):
             self.log_append("[TEST] Valor inválido para órdenes mínimas")
 
     # ------------------- Testeos masivos -------------------
-    def on_start_mass_tests(self) -> None:
-        """Callback para iniciar los ciclos de testeos masivos."""
-        self.log_append("[TEST] Iniciar Testeos presionado")
-        self.mass_state.current_cycle += 1
-        self.mass_state.save()
+    def on_toggle_mass_tests(self, running: bool) -> None:
+        """Inicia o detiene los ciclos de testeos masivos."""
+        if running:
+            self.log_append("[TEST] Iniciar Testeos presionado")
+            self.mass_state.current_cycle += 1
+            self.mass_state.save()
+        else:
+            self.log_append("[TEST] Testeos detenidos")
 
     def on_load_winner_for_sim(self) -> None:
         """Carga la configuración ganadora en el bot SIM."""
