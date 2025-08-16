@@ -12,7 +12,6 @@ from .models import BotConfig, BotStats, SupervisorEvent
 
 DB_FILENAME = "titanbot.db"
 
-
 class SQLiteStorage:
     """Persist data from supervisors and runners into SQLite."""
 
@@ -60,6 +59,7 @@ class SQLiteStorage:
             params.append(cycle)
         with self._lock:
             rows = self.conn.execute(query, params).fetchall()
+
         events = []
         for row in rows:
             payload = json.loads(row["payload_json"]) if row["payload_json"] else None
@@ -157,6 +157,7 @@ class SQLiteStorage:
         query += " ORDER BY cycle_id DESC LIMIT 1"
         with self._lock:
             row = self.conn.execute(query, params).fetchone()
+
         if row is None:
             return None
         return BotStats(
@@ -277,6 +278,7 @@ class SQLiteStorage:
                 "SELECT cycle_id, started_at, finished_at, winner_bot_id, winner_reason FROM cycles WHERE cycle_id = ?",
                 (cycle,),
             ).fetchone()
+
         if row is None:
             return None
         return dict(row)

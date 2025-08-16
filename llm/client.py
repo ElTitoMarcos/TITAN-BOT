@@ -4,9 +4,7 @@ from __future__ import annotations
 import json
 import os
 from typing import Dict, List, Optional
-
 from .prompts import PROMPT_INICIAL_VARIACIONES, PROMPT_ANALISIS_CICLO
-
 
 class LLMClient:
     """Wrapper liviano sobre OpenAI que genera variaciones iniciales.
@@ -168,3 +166,4 @@ class LLMClient:
             "winner_bot_id": int(best_id) if best_id is not None else -1,
             "reason": "max_pnl",
         }
+
