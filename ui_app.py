@@ -1,4 +1,4 @@
-import threading, queue, time, json, os
+import threading, queue, time, json, os, copy
 import ttkbootstrap as tb
 from ttkbootstrap.constants import *
 from ttkbootstrap.scrolled import ScrolledText
@@ -8,6 +8,7 @@ from config import UIColors, Defaults, AppState
 from engine import Engine
 from scoring import compute_score
 from test_manager import TestManager
+from llm_client import LLMClient
 
 BADGE_SIM = "🔧SIM"
 BADGE_LIVE = "⚡LIVE"
@@ -90,6 +91,22 @@ class App(tb.Window):
             self._sort_col, self._sort_reverse = col, reverse
             self.tree.heading(col, command=lambda: self._sort_tree(col, not reverse))
 
+    def _handle_rate_limit(self, err: Exception) -> bool:
+        msg = str(err)
+        keywords = ["way too much request weight", "ip banned", "418 i'm a teapot"]
+        if any(k in msg.lower() for k in keywords):
+            self.log_append("[SECURITY] IP ban detectado, deteniendo bots.")
+            if self._engine_sim and self._engine_sim.is_alive():
+                self._engine_sim.stop()
+                self.var_bot_sim.set(False)
+                self.lbl_state_sim.configure(text="SIM: OFF", bootstyle=SECONDARY)
+            if self._engine_live and self._engine_live.is_alive():
+                self._engine_live.stop()
+                self.var_bot_live.set(False)
+                self.lbl_state_live.configure(text="LIVE: OFF", bootstyle=SECONDARY)
+            return True
+        return False
+
     def __init__(self):
         super().__init__(title="AutoBTC - Punto a Punto", themename="cyborg")
         self.geometry("1400x860")
@@ -105,11 +122,13 @@ class App(tb.Window):
         self._engine_live: Engine | None = None
         self.exchange = None
         self._tester: TestManager | None = None
+        self.var_min_orders = tb.IntVar(value=50)
 
         self.metric_defaults = dict(self.cfg.weights)
         self.metric_vars: Dict[str, tb.BooleanVar] = {}
 
         self._keys_file = os.path.join(os.path.dirname(__file__), ".api_keys.json")
+        self._last_market_refresh: float = 0.0
 
         self._build_ui()
         self._load_saved_keys()
@@ -321,9 +340,12 @@ class App(tb.Window):
         frm_info.rowconfigure(0, weight=1); frm_info.columnconfigure(0, weight=1); frm_info.columnconfigure(1, weight=1)
         self.txt_info = ScrolledText(frm_info, height=6, autohide=True, wrap="word")
         self.txt_info.grid(row=0, column=0, columnspan=2, sticky="nsew")
-        ttk.Button(frm_info, text="Iniciar Testeos", command=self._start_tests).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(4,0))
-        ttk.Button(frm_info, text="Revertir patch", command=self._revert_patch).grid(row=2, column=0, sticky="ew", pady=(4,0))
-        ttk.Button(frm_info, text="Aplicar a LIVE", command=self._apply_winner_live).grid(row=2, column=1, sticky="ew", pady=(4,0))
+        ttk.Label(frm_info, text="Órdenes mínimas").grid(row=1, column=0, sticky="w")
+        ttk.Entry(frm_info, textvariable=self.var_min_orders, width=10).grid(row=1, column=1, sticky="e")
+        self.btn_tests = ttk.Button(frm_info, text="Iniciar Testeos", command=self._toggle_tests)
+        self.btn_tests.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(4,0))
+        ttk.Button(frm_info, text="Revertir patch", command=self._revert_patch).grid(row=3, column=0, sticky="ew", pady=(4,0))
+        ttk.Button(frm_info, text="Aplicar a LIVE", command=self._apply_winner_live).grid(row=3, column=1, sticky="ew", pady=(4,0))
 
         # Métricas de Score
         frm_met = ttk.Labelframe(right, text="Métricas Score", padding=8)
@@ -439,10 +461,15 @@ class App(tb.Window):
             except Exception:
                 pass
         except Exception as e:
-            self.log_append(f"[ENGINE] Warmup error: {e}")
+            if not self._handle_rate_limit(e):
+                self.log_append(f"[ENGINE] Warmup error: {e}")
 
     def _refresh_market_candidates(self):
         try:
+            now = time.time()
+            if now - self._last_market_refresh < 30:
+                return
+            self._last_market_refresh = now
             self._ensure_exchange()
             uni = [s for s in self.exchange.fetch_universe("BTC") if s.endswith("/BTC")][:100]
 
@@ -507,7 +534,8 @@ class App(tb.Window):
                 self._snapshot = {**self._snapshot, "pairs": pairs, "candidates": cands}
             self._refresh_market_table(pairs, cands)
         except Exception as e:
-            self.log_append(f"[ENGINE] Error al refrescar mercado: {e}")
+            if not self._handle_rate_limit(e):
+                self.log_append(f"[ENGINE] Error al refrescar mercado: {e}")
 
     # ------------------- Engine binding -------------------
     def _on_bot_sim(self, *_):
@@ -552,6 +580,7 @@ class App(tb.Window):
         self._ensure_exchange()
         self._engine_sim = Engine(ui_push_snapshot=push_snapshot, ui_log=self.log_append, exchange=self.exchange, name="SIM")
         self._engine_sim.mode = "SIM"
+        self._engine_sim.cfg = copy.deepcopy(self.cfg)
         self._engine_sim.cfg.size_usd_sim = float(self.var_size_sim.get())
         # LLM
         self._engine_sim.llm.set_model(self.var_llm_model.get())
@@ -606,6 +635,9 @@ class App(tb.Window):
     def _apply_binance_keys(self):
         key = self.var_bin_key.get().strip()
         sec = self.var_bin_sec.get().strip()
+        if not key or not sec:
+            self.log_append("[ENGINE] Claves de Binance incompletas.")
+            return False
         self._ensure_exchange()
         self.exchange.set_api_keys(key, sec)
         if self._engine_sim:
@@ -615,9 +647,9 @@ class App(tb.Window):
         self.log_append("[ENGINE] Claves de Binance aplicadas.")
         try:
             self.exchange.load_markets()
-            return True
-        except Exception:
-            return False
+        except Exception as e:
+            self.log_append(f"[ENGINE] No se pudieron verificar las claves ({e}). Continuando de todos modos.")
+        return True
 
     def _apply_openai_key(self):
         k = self.var_oai_key.get().strip()
@@ -674,32 +706,56 @@ class App(tb.Window):
             self._engine_live.cfg.weights = dict(self.cfg.weights)
         threading.Thread(target=self._refresh_market_candidates, daemon=True).start()
 
-    def _start_tests(self):
-        if not self._engine_sim:
-            self.log_append("[TEST] Motor SIM no iniciado")
-            return
+    def _toggle_tests(self):
         if self._tester and self._tester.is_alive():
-            self.log_append("[TEST] Ciclo de testeo ya en ejecución")
+            self._tester.stop()
+            try:
+                self._tester.join(timeout=2)
+            except Exception:
+                pass
+            self._tester = None
+            self.btn_tests.configure(text="Iniciar Testeos")
+            self.log_append("[TEST] Ciclo de testeo detenido")
             return
+        if self._tester and not self._tester.is_alive():
+            self._tester = None
         def info(msg: str):
             def upd():
                 self.txt_info.insert("end", msg + "\n")
                 self.txt_info.see("end")
             self.after(0, upd)
         self.txt_info.delete("1.0", "end")
-        self._tester = TestManager(self._engine_sim.cfg, self._engine_sim.llm, self.log_append, info)
+        min_orders = max(1, int(self.var_min_orders.get()))
+        llm = self._engine_sim.llm if self._engine_sim else LLMClient(model=self.var_llm_model.get(), api_key=self.var_oai_key.get())
+        self._tester = TestManager(copy.deepcopy(self.cfg), llm, self.log_append, info, min_orders=min_orders)
         self._tester.start()
+        self.btn_tests.configure(text="Detener Testeos")
         self.log_append("[TEST] Ciclo de testeo iniciado")
+        self.after(500, self._check_tester_done)
+
+    def _check_tester_done(self):
+        if self._tester and self._tester.is_alive():
+            self.after(500, self._check_tester_done)
+            return
+        if not self._tester:
+            return
+        if self._engine_sim and self._tester.winner_cfg:
+            self._engine_sim.cfg = copy.deepcopy(self._tester.winner_cfg)
+            self.cfg = copy.deepcopy(self._tester.winner_cfg)
+            self.log_append("[TEST] Config ganadora aplicada al bot SIM.")
+        self.btn_tests.configure(text="Iniciar Testeos")
+        self.log_append("[TEST] Ciclo de testeo finalizado")
+        self._tester = None
 
     def _apply_winner_live(self):
-        if not self._tester or self._tester.winner_thr is None:
+        if not self._tester or not self._tester.winner_cfg:
             self.log_append("[TEST] No hay versión ganadora disponible")
             return
         if not self._engine_live:
             self.log_append("[TEST] Motor LIVE no iniciado")
             return
-        self._engine_live.cfg.opportunity_threshold_percent = self._tester.winner_thr
-        self.log_append(f"[TEST] Umbral LIVE actualizado a {self._tester.winner_thr:.4f}")
+        self._engine_live.cfg = copy.deepcopy(self._tester.winner_cfg)
+        self.log_append("[TEST] Config LIVE actualizada con variante ganadora")
 
     def _send_llm_query(self):
         q = self.var_llm_query.get().strip()

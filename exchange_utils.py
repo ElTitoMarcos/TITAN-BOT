@@ -119,6 +119,7 @@ class BinanceWS:
                     "bid_top_qty": top_bid_qty, "ask_top_qty": top_ask_qty,
                     "trade_flow": {"buy_ratio": buy_ratio, "streak": int(flow.get("streak",0))},
                 }
+        self._top_metrics_cache = {"ts": now, "symbols": symbols, "data": list(out)}
         return out
 
     def latency_ms(self) -> float:
@@ -140,6 +141,8 @@ class BinanceExchange:
         self._markets_loaded = False
         self.ws = BinanceWS()
         self._usd_cache: Dict[str, float] = {}
+        self._top_metrics_cache: Dict[str, Any] = {"ts": 0.0, "symbols": [], "data": []}
+        self._trend_cache: Dict[str, Any] = {"ts": 0.0, "symbols": [], "data": {}}
 
     def set_api_keys(self, key: str, secret: str):
         self.exchange = ccxt.binance({
@@ -238,7 +241,13 @@ class BinanceExchange:
 
     def fetch_top_metrics(self, symbols: List[str], limit: int = 200) -> List[Dict[str, Any]]:
         out: List[Dict[str, Any]] = []
-        if not symbols: return out
+        symbols = symbols[:limit]
+        if not symbols:
+            return out
+        now = time.time()
+        cache = self._top_metrics_cache
+        if (now - cache.get("ts", 0.0) < 5.0) and cache.get("symbols") == symbols:
+            return list(cache.get("data", []))
         try:
             tickers = self.exchange.fetch_tickers(symbols)
         except Exception:
@@ -248,7 +257,7 @@ class BinanceExchange:
         except Exception:
             ws_snap = {}
 
-        for sym in symbols[:limit]:
+        for sym in symbols:
             t = (tickers or {}).get(sym, {})
             last = float(t.get("last") or t.get("close") or 0.0) if t else 0.0
             ws = (ws_snap or {}).get(sym, {})
@@ -271,21 +280,6 @@ class BinanceExchange:
                     topa = float(asks[0][1])
                     vola = sum(float(q) for _, q in asks[:5])
                 spread_abs = abs(ba - bb) if (bb and ba) else spread_abs
-            imb = (topb / (topb + topa)) if (topb + topa) > 0 else 0.5
-
-                try:
-                    ob = self.exchange.fetch_order_book(sym, limit=5)
-                    bids = ob.get("bids", [])
-                    asks = ob.get("asks", [])
-                    if bids:
-                        bb = float(bids[0][0]); topb = float(bids[0][1])
-                        volb = sum(float(q) for _, q in bids[:5])
-                    if asks:
-                        ba = float(asks[0][0]); topa = float(asks[0][1])
-                        vola = sum(float(q) for _, q in asks[:5])
-                    spread_abs = abs(ba - bb) if (bb and ba) else spread_abs
-                except Exception:
-                    pass
             imb = (topb / (topb + topa)) if (topb + topa) > 0 else 0.5
             mkt = (self.exchange.markets or {}).get(sym, {})
             precision = (mkt.get("precision") or {}).get("price")
@@ -325,6 +319,7 @@ class BinanceExchange:
                 }
             )
 
+        self._top_metrics_cache = {"ts": now, "symbols": symbols, "data": list(out)}
         return out
 
     # ---------- Quotes -> USD ----------
@@ -438,6 +433,10 @@ class BinanceExchange:
     # ---------- Tendencias ----------
     def fetch_trend_metrics(self, symbols: List[str]) -> Dict[str, Dict[str, float]]:
         out: Dict[str, Dict[str, float]] = {}
+        now = time.time()
+        cache = self._trend_cache
+        if (now - cache.get("ts", 0.0) < 60.0) and cache.get("symbols") == symbols:
+            return dict(cache.get("data", {}))
         for sym in symbols:
             trends: Dict[str, float] = {}
             try:
@@ -459,4 +458,5 @@ class BinanceExchange:
             except Exception:
                 pass
             out[sym] = trends
+        self._trend_cache = {"ts": now, "symbols": symbols, "data": dict(out)}
         return out
