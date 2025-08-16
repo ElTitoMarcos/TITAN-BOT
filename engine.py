@@ -24,7 +24,8 @@ class Engine(threading.Thread):
         self.name = name
         self.llm = LLMClient(model=self.cfg.llm_model, temperature_operativo=self.cfg.llm_temperature, api_key=self.cfg.openai_api_key)
         self.ui_push_snapshot = ui_push_snapshot
-        self._stop = threading.Event()
+        # Evento privado para detener el hilo sin colisionar con Thread._stop()
+        self._stop_event = threading.Event()
 
         self.mode: str = "SIM"  # "SIM" | "LIVE"
         self._last_actions: List[Dict[str, Any]] = []
@@ -46,10 +47,40 @@ class Engine(threading.Thread):
                 w.writerow(["ts","event","symbol","detail"])
 
     def stop(self):
-        self._stop.set()
+        """Señala al hilo que debe detenerse."""
+        self._stop_event.set()
 
     def is_stopped(self) -> bool:
-        return self._stop.is_set()
+        return self._stop_event.is_set()
+
+    # --------------------- Patches LLM ---------------------
+    def apply_llm_patch(self, code: str):
+        backup: Dict[str, Any] = {}
+        local_ns: Dict[str, Any] = {}
+        try:
+            exec(code, {}, local_ns)
+            for k, v in local_ns.items():
+                backup[k] = getattr(self, k, None)
+                setattr(self, k, v)
+            self._patch_history.append((backup, code))
+            self._last_patch_code = code
+            self.ui_log(f"[LLM PATCH] aplicado: {list(local_ns.keys())}")
+        except Exception as e:
+            self.ui_log(f"[LLM PATCH] error: {e}")
+
+    def revert_last_patch(self):
+        if not self._patch_history:
+            return
+        backup, _ = self._patch_history.pop()
+        for k, v in backup.items():
+            if v is None:
+                try:
+                    delattr(self, k)
+                except Exception:
+                    pass
+            else:
+                setattr(self, k, v)
+        self.ui_log("[LLM PATCH] revertido")
 
     # --------------------- Patches LLM ---------------------
     def apply_llm_patch(self, code: str):

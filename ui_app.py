@@ -166,7 +166,6 @@ class App(tb.Window):
             "trend_w","trend_d","trend_h","trend_m",
             "pressure","flow","depth_buy","depth_sell",
             "momentum","spread","micro_vol",
-
         )
         self.tree = ttk.Treeview(frm_mkt, columns=cols, show="headings")
         style = tb.Style(); style.configure("Treeview", font=("Consolas", 10))
@@ -391,7 +390,6 @@ class App(tb.Window):
         try:
             self._ensure_exchange()
             uni = [s for s in self.exchange.fetch_universe("BTC") if s.endswith("/BTC")][:100]
-
             if uni:
                 pairs = self.exchange.fetch_top_metrics(uni[: min(20, len(uni))])
                 try:

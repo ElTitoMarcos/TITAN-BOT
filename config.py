@@ -17,7 +17,8 @@ class Defaults:
     opportunity_threshold_percent: float = 0.2  # 2*fee por defecto
 
     # Tamaños por modo
-    size_usd_sim: float = 25.0
+    # Tamaño por defecto para operaciones simuladas
+    size_usd_sim: float = 500.0
     size_usd_live: float = 50.0
 
     # LLM / engine

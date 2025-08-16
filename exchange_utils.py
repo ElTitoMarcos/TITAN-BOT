@@ -214,15 +214,6 @@ class BinanceExchange:
             bids, asks = [], []
         return bids, asks
 
-    def _safe_order_book(self, sym: str):
-        try:
-            ob = self.exchange.fetch_order_book(sym, limit=5)
-            bids = ob.get("bids", [])
-            asks = ob.get("asks", [])
-        except Exception:
-            bids, asks = [], []
-        return bids, asks
-
     # ---------- Universe + metrics ----------
     def fetch_universe(self, quote: Optional[str] = "BTC") -> List[str]:
         key = (quote or "ALL").upper()
