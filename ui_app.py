@@ -105,6 +105,8 @@ class App(tb.Window):
         self._engine_live: Engine | None = None
         self.exchange = None
         self._tester: TestManager | None = None
+        self.var_min_orders = tb.IntVar(value=50)
+        self._auto_started_sim = False
 
         self.metric_defaults = dict(self.cfg.weights)
         self.metric_vars: Dict[str, tb.BooleanVar] = {}
@@ -321,9 +323,12 @@ class App(tb.Window):
         frm_info.rowconfigure(0, weight=1); frm_info.columnconfigure(0, weight=1); frm_info.columnconfigure(1, weight=1)
         self.txt_info = ScrolledText(frm_info, height=6, autohide=True, wrap="word")
         self.txt_info.grid(row=0, column=0, columnspan=2, sticky="nsew")
-        ttk.Button(frm_info, text="Iniciar Testeos", command=self._start_tests).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(4,0))
-        ttk.Button(frm_info, text="Revertir patch", command=self._revert_patch).grid(row=2, column=0, sticky="ew", pady=(4,0))
-        ttk.Button(frm_info, text="Aplicar a LIVE", command=self._apply_winner_live).grid(row=2, column=1, sticky="ew", pady=(4,0))
+        ttk.Label(frm_info, text="Órdenes mínimas").grid(row=1, column=0, sticky="w")
+        ttk.Entry(frm_info, textvariable=self.var_min_orders, width=10).grid(row=1, column=1, sticky="e")
+        self.btn_tests = ttk.Button(frm_info, text="Iniciar Testeos", command=self._toggle_tests)
+        self.btn_tests.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(4,0))
+        ttk.Button(frm_info, text="Revertir patch", command=self._revert_patch).grid(row=3, column=0, sticky="ew", pady=(4,0))
+        ttk.Button(frm_info, text="Aplicar a LIVE", command=self._apply_winner_live).grid(row=3, column=1, sticky="ew", pady=(4,0))
 
         # Métricas de Score
         frm_met = ttk.Labelframe(right, text="Métricas Score", padding=8)
@@ -674,10 +679,31 @@ class App(tb.Window):
             self._engine_live.cfg.weights = dict(self.cfg.weights)
         threading.Thread(target=self._refresh_market_candidates, daemon=True).start()
 
-    def _start_tests(self):
-        if not self._engine_sim:
-            self.log_append("[TEST] Motor SIM no iniciado")
+    def _toggle_tests(self):
+        if self._tester and self._tester.is_alive():
+            self._tester.stop()
+            try:
+                self._tester.join(timeout=2)
+            except Exception:
+                pass
+            self._tester = None
+            self.btn_tests.configure(text="Iniciar Testeos")
+            self.log_append("[TEST] Ciclo de testeo detenido")
+            if self._auto_started_sim and self._engine_sim:
+                self._engine_sim.stop()
+                self._engine_sim = None
+                self.var_bot_sim.set(False)
+                self.lbl_state_sim.configure(text="SIM: OFF", bootstyle=SECONDARY)
+                self.log_append("[ENGINE SIM] Bot SIM detenido.")
             return
+        if not self._engine_sim or not self._engine_sim.is_alive():
+            self._auto_started_sim = True
+            self._start_engine_sim()
+            self.var_bot_sim.set(True)
+            self.lbl_state_sim.configure(text="SIM: ON", bootstyle=SUCCESS)
+            self.log_append("[ENGINE SIM] Bot SIM iniciado automáticamente para tests.")
+        else:
+            self._auto_started_sim = False
         if self._tester and self._tester.is_alive():
             self.log_append("[TEST] Ciclo de testeo ya en ejecución")
             return
@@ -687,8 +713,10 @@ class App(tb.Window):
                 self.txt_info.see("end")
             self.after(0, upd)
         self.txt_info.delete("1.0", "end")
-        self._tester = TestManager(self._engine_sim.cfg, self._engine_sim.llm, self.log_append, info)
+        min_orders = max(1, int(self.var_min_orders.get()))
+        self._tester = TestManager(self._engine_sim.cfg, self._engine_sim.llm, self.log_append, info, min_orders=min_orders)
         self._tester.start()
+        self.btn_tests.configure(text="Detener Testeos")
         self.log_append("[TEST] Ciclo de testeo iniciado")
 
     def _apply_winner_live(self):
