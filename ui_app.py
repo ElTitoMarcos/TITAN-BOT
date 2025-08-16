@@ -53,6 +53,11 @@ class App(tb.Window):
                             w.configure(state="normal")
                 except Exception:
                     pass
+            if getattr(self, "var_use_min_bin", None) and self.var_use_min_bin.get():
+                try:
+                    self.ent_size_live.configure(state="disabled")
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -204,42 +209,56 @@ class App(tb.Window):
         # Tamaños + toggle mínimo + apply
         frm_size = ttk.Labelframe(right, text="Tamaño por operación (USD)", padding=8)
         frm_size.grid(row=1, column=0, sticky="ew", pady=6)
+        frm_size.columnconfigure(1, weight=1)
         self.var_size_sim = tb.DoubleVar(value=self.cfg.size_usd_sim)
         self.var_size_live = tb.DoubleVar(value=self.cfg.size_usd_live)
+        self.var_use_min_bin = tb.BooleanVar(value=False)
         ttk.Label(frm_size, text="SIM").grid(row=0, column=0, sticky="w")
         self.ent_size_sim = ttk.Entry(frm_size, textvariable=self.var_size_sim, width=14)
-        self.ent_size_sim.grid(row=0, column=1, sticky="e")
+        self.ent_size_sim.grid(row=0, column=1, sticky="ew")
         ttk.Label(frm_size, text="LIVE").grid(row=1, column=0, sticky="w")
         self.ent_size_live = ttk.Entry(frm_size, textvariable=self.var_size_live, width=14)
-        self.ent_size_live.grid(row=1, column=1, sticky="e")
+        self.ent_size_live.grid(row=1, column=1, sticky="ew")
         ttk.Button(frm_size, text="Aplicar tamaño", command=self._apply_sizes).grid(row=0, column=2, rowspan=2, padx=6)
         self.lbl_min_marker = ttk.Label(frm_size, text="Mínimo Binance: --")
         self.lbl_min_marker.grid(row=2, column=0, columnspan=2, sticky="w", pady=(4,0))
-        ttk.Button(frm_size, text="Min Binance", command=self._show_min_binance).grid(
-            row=2, column=2, padx=6, pady=(4, 0)
-        )
+        ttk.Checkbutton(
+            frm_size,
+            text="Min Binance",
+            variable=self.var_use_min_bin,
+            style="info.Switch",
+            command=self._toggle_min_binance,
+        ).grid(row=2, column=2, padx=6, pady=(4,0))
 
         # API keys
         frm_api = ttk.Labelframe(right, text="Claves API", padding=8)
         frm_api.grid(row=2, column=0, sticky="ew", pady=6)
+        frm_api.columnconfigure(1, weight=1)
         self.var_bin_key = tb.StringVar(value="")
         self.var_bin_sec = tb.StringVar(value="")
         ttk.Label(frm_api, text="Binance KEY").grid(row=0, column=0, sticky="w")
-        ttk.Entry(frm_api, textvariable=self.var_bin_key, width=28).grid(row=0, column=1, sticky="e")
+        ttk.Entry(frm_api, textvariable=self.var_bin_key, width=28).grid(row=0, column=1, sticky="ew")
         ttk.Label(frm_api, text="Binance SECRET").grid(row=1, column=0, sticky="w")
-        ttk.Entry(frm_api, textvariable=self.var_bin_sec, width=28, show="•").grid(row=1, column=1, sticky="e")
+        ttk.Entry(frm_api, textvariable=self.var_bin_sec, width=28, show="•").grid(row=1, column=1, sticky="ew")
 
         self.var_oai_key = tb.StringVar(value="")
         ttk.Label(frm_api, text="ChatGPT API Key").grid(row=2, column=0, sticky="w")
-        ttk.Entry(frm_api, textvariable=self.var_oai_key, width=28, show="•").grid(row=2, column=1, sticky="e")
+        ttk.Entry(frm_api, textvariable=self.var_oai_key, width=28, show="•").grid(row=2, column=1, sticky="ew")
         ttk.Button(frm_api, text="Confirmar APIs", command=self._confirm_apis).grid(row=0, column=2, rowspan=3, padx=6)
 
         # LLM config minimal: model + seconds + apply button
         frm_llm = ttk.Labelframe(right, text="LLM (decisor)", padding=8)
         frm_llm.grid(row=3, column=0, sticky="ew", pady=6)
+        frm_llm.columnconfigure(1, weight=1)
         self.var_llm_model = tb.StringVar(value=self.cfg.llm_model)
         ttk.Label(frm_llm, text="Modelo").grid(row=0, column=0, sticky="w")
-        ttk.Combobox(frm_llm, textvariable=self.var_llm_model, values=["gpt-4o","gpt-4o-mini","gpt-4.1","gpt-4.1-mini"], width=14, state="readonly").grid(row=0, column=1, sticky="e")
+        ttk.Combobox(
+            frm_llm,
+            textvariable=self.var_llm_model,
+            values=["gpt-4o","gpt-4o-mini","gpt-4.1","gpt-4.1-mini"],
+            width=14,
+            state="readonly",
+        ).grid(row=0, column=1, sticky="ew")
         ttk.Button(frm_llm, text="Aplicar LLM", command=self._apply_llm).grid(row=0, column=2, padx=6)
 
         # Consulta LLM
@@ -422,14 +441,22 @@ class App(tb.Window):
         except Exception:
             pass
 
-    def _show_min_binance(self):
-        """Obtiene y muestra el tamaño mínimo permitido por Binance."""
-        try:
-            self._ensure_exchange()
-            min_usd = self.exchange.global_min_notional_usd()
-            self.lbl_min_marker.configure(text=f"Mínimo Binance: {min_usd:.2f} USDT")
-        except Exception:
-            self.lbl_min_marker.configure(text="Mínimo Binance: --")
+    def _toggle_min_binance(self):
+        """Activa el tamaño mínimo permitido por Binance para LIVE."""
+        use_min = bool(self.var_use_min_bin.get())
+        if use_min:
+            try:
+                self._ensure_exchange()
+                min_usd = self.exchange.global_min_notional_usd()
+                self.var_size_live.set(min_usd)
+                self.ent_size_live.configure(state="disabled")
+                self.lbl_min_marker.configure(text=f"Mínimo Binance: {min_usd:.2f} USDT")
+            except Exception:
+                self.var_use_min_bin.set(False)
+                self.ent_size_live.configure(state="normal")
+                self.lbl_min_marker.configure(text="Mínimo Binance: --")
+        else:
+            self.ent_size_live.configure(state="normal")
 
     def _apply_min_orders(self):
         """Aplica el mínimo de órdenes requerido para la sesión de test."""
