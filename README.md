@@ -38,6 +38,6 @@ python .\main.py
 ### Cambios recientes
 - Paneles siempre visibles (Mercado, Abiertas, Cerradas).
 - Botón **Aplicar tamaño**: fija SIM editable y LIVE al **mínimo permitido por Binance** del símbolo seleccionado (campo LIVE bloqueado).
-- LLM: solo **Modelo** + **Segundos entre llamadas** (por defecto 120s).
+- LLM: solo **Modelo**.
 - Gating LLM: no se llama si no hay órdenes abiertas ni candidatos (score/edge/%).
 - Razones más explícitas al no operar.
