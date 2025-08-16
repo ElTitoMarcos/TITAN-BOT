@@ -78,7 +78,7 @@ class BotRunner:
                     "raw_json": json.dumps(sell),
                 }
             )
-            
+
             open_orders.append((buy, sell))
             orders_count += 2
 
@@ -110,7 +110,6 @@ class BotRunner:
 
         runtime_s = int(time.time() - start)
         notional = params.order_size_usd * (orders_count / 2)
-
         pnl_pct = (pnl / notional * 100.0) if notional else 0.0
 
         stats = BotStats(

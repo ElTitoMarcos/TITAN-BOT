@@ -92,7 +92,7 @@ class App(tb.Window):
         self._snapshot: Dict[str, Any] = {}
         self._log_queue: "queue.Queue[str]" = queue.Queue()
         self._event_queue: "queue.Queue" = queue.Queue()
-        self._supervisor = Supervisor()
+        self._supervisor = Supervisor(app_state=self.mass_state)
         self._supervisor.stream_events(lambda ev: self._event_queue.put(ev))
         self._engine_sim: Engine | None = None
         self._engine_live: Engine | None = None
@@ -477,8 +477,6 @@ class App(tb.Window):
         """Inicia o detiene los ciclos de testeos masivos."""
         if running:
             self.log_append("[TEST] Iniciar Testeos presionado")
-            self.mass_state.current_cycle += 1
-            self.mass_state.save()
             self._supervisor.start_mass_tests()
         else:
             self.log_append("[TEST] Testeos detenidos")
@@ -540,6 +538,11 @@ class App(tb.Window):
                     if wid is not None:
                         self._winner_cfg = self._supervisor.storage.get_bot(wid)
                         self.testeos_frame.set_winner(int(wid), reason)
+                elif ev.message == "cycle_finished" and ev.payload:
+                    info = ev.payload
+                    info["cycle"] = ev.cycle
+                    self.testeos_frame.add_cycle_history(info)
+
         except queue.Empty:
             pass
         self.after(200, self._poll_event_queue)

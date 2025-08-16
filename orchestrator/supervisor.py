@@ -2,30 +2,38 @@
 from __future__ import annotations
 
 import asyncio
+import csv
 import json
 import hashlib
 import random
 import threading
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
 from llm import LLMClient
 
 from .models import BotConfig, BotStats, SupervisorEvent
 from .storage import SQLiteStorage
-
+from state.app_state import AppState
 
 class Supervisor:
     """Orquesta ciclos de bots ejecutados en paralelo."""
 
-    def __init__(self, storage: Optional[SQLiteStorage] = None) -> None:
+    def __init__(
+        self,
+        storage: Optional[SQLiteStorage] = None,
+        app_state: Optional[AppState] = None,
+    ) -> None:
         self.storage = storage or SQLiteStorage()
+        self.state = app_state or AppState.load()
+
         self._callbacks: List[Callable[[SupervisorEvent], None]] = []
-        self._running = False
+        self.mass_tests_enabled = False
         self._thread: Optional[threading.Thread] = None
         self._num_bots = 10
-        self._next_bot_id = 1
+        self._next_bot_id = self.state.next_bot_id
         self._current_generation: List[BotConfig] = []
 
     # ------------------------------------------------------------------
@@ -62,10 +70,10 @@ class Supervisor:
     # ------------------------------------------------------------------
     def start_mass_tests(self, num_bots: int = 10) -> None:
         """Inicia el ciclo continuo de testeos en un hilo aparte."""
-        if self._running:
+        if self.mass_tests_enabled:
             return
         self._num_bots = num_bots
-        self._running = True
+        self.mass_tests_enabled = True
         # Generación inicial vacía -> se creará en el primer ciclo
         self._current_generation = []
         self._thread = threading.Thread(target=self._loop, daemon=True)
@@ -73,12 +81,12 @@ class Supervisor:
 
     def stop_mass_tests(self) -> None:
         """Detiene los ciclos de testeos."""
-        self._running = False
+        self.mass_tests_enabled = False
 
     # ------------------------------------------------------------------
     def _loop(self) -> None:
-        cycle = 1
-        while self._running:
+        while self.mass_tests_enabled:
+            cycle = self.state.current_cycle + 1
             asyncio.run(self.run_cycle(cycle))
             stats = self.gather_results(cycle)
             cycle_summary = self._compose_cycle_summary(cycle, stats)
@@ -93,6 +101,10 @@ class Supervisor:
             except Exception:
                 winner_id, winner_cfg = self.pick_winner(cycle)
                 winner_reason = "max_pnl"
+            total_pnl = sum(s.pnl for s in stats)
+            cycle_summary["winner_bot_id"] = winner_id
+            cycle_summary["winner_reason"] = winner_reason
+
             self._emit(
                 "INFO",
                 "cycle",
@@ -102,17 +114,35 @@ class Supervisor:
                 {"winner_id": winner_id, "reason": winner_reason},
             )
             self._emit("INFO", "bot", cycle, winner_id, "bot_winner", {"reason": winner_reason})
+            finished_at = datetime.utcnow().isoformat()
             self.storage.save_cycle_summary(
                 cycle,
                 {
-                    "finished_at": datetime.utcnow().isoformat(),
+                    "finished_at": finished_at,
                     "winner_bot_id": winner_id,
                     "winner_reason": winner_reason,
                 },
             )
+            self.export_report(cycle, cycle_summary)
+            self._emit(
+                "INFO",
+                "cycle",
+                cycle,
+                None,
+                "cycle_finished",
+                {
+                    "total_pnl": total_pnl,
+                    "winner_id": winner_id,
+                    "winner_reason": winner_reason,
+                    "finished_at": finished_at,
+                },
+
+            )
             self.spawn_next_generation_from_winner(winner_cfg)
-            cycle += 1
-        self._running = False
+            self.state.current_cycle = cycle
+            self.state.next_bot_id = self._next_bot_id
+            self.state.save()
+        self.mass_tests_enabled = False
 
     # ------------------------------------------------------------------
     async def run_cycle(self, cycle: int) -> None:
@@ -286,3 +316,27 @@ class Supervisor:
     def _fingerprint(self, mutations: Dict[str, object]) -> str:
         """Crea un hash de los parámetros para evitar duplicados."""
         return hashlib.sha256(json.dumps(mutations, sort_keys=True).encode()).hexdigest()
+
+    # ------------------------------------------------------------------
+    def export_report(self, cycle: int, summary: Dict[str, object]) -> None:
+        """Exporta un resumen del ciclo en JSON y CSV."""
+        reports = Path("reports")
+        reports.mkdir(exist_ok=True)
+        json_path = reports / f"cycle_{cycle}.json"
+        with json_path.open("w", encoding="utf-8") as fh:
+            json.dump(summary, fh, ensure_ascii=False, indent=2)
+        csv_rows = []
+        for bot in summary.get("bots", []):
+            row = {
+                "bot_id": bot.get("bot_id"),
+                "pnl": bot.get("stats", {}).get("pnl"),
+                "pnl_pct": bot.get("stats", {}).get("pnl_pct"),
+                "orders": bot.get("stats", {}).get("orders"),
+            }
+            csv_rows.append(row)
+        if csv_rows:
+            csv_path = reports / f"cycle_{cycle}.csv"
+            with csv_path.open("w", newline="", encoding="utf-8") as fh:
+                writer = csv.DictWriter(fh, fieldnames=list(csv_rows[0].keys()))
+                writer.writeheader()
+                writer.writerows(csv_rows)

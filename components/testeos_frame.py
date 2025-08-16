@@ -23,6 +23,7 @@ class TesteosFrame(ttk.Frame):
         """Construye los widgets principales."""
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
+        self.rowconfigure(4, weight=1)
 
         self.btn_toggle = ttk.Button(
             self,
@@ -56,6 +57,21 @@ class TesteosFrame(ttk.Frame):
 
         self.lbl_winner = ttk.Label(self, text="Ganador: -", anchor="w")
         self.lbl_winner.grid(row=3, column=0, sticky="w", pady=(6, 0))
+
+        cols_c = ("cycle", "pnl", "winner", "fecha")
+        self.tree_cycles = ttk.Treeview(self, columns=cols_c, show="headings", height=5)
+        for c, txt, w in [
+            ("cycle", "Ciclo", 80),
+            ("pnl", "PNL Total", 100),
+            ("winner", "Ganador", 120),
+            ("fecha", "Fecha", 150),
+        ]:
+            self.tree_cycles.heading(c, text=txt)
+            self.tree_cycles.column(c, width=w, anchor="center", stretch=True)
+        vsb_c = ttk.Scrollbar(self, orient="vertical", command=self.tree_cycles.yview)
+        self.tree_cycles.configure(yscrollcommand=vsb_c.set)
+        self.tree_cycles.grid(row=4, column=0, sticky="nsew", pady=(8, 0))
+        vsb_c.grid(row=4, column=1, sticky="ns")
 
     def _toggle(self) -> None:
         """Alterna el estado de los testeos y actualiza el botón."""
@@ -103,6 +119,16 @@ class TesteosFrame(ttk.Frame):
             vals[-1] = "✅"
             self.tree.item(str(bot_id), values=vals)
         self.lbl_winner.configure(text=f"Ganador: Bot {bot_id} - {reason}")
+
+    def add_cycle_history(self, info: Dict[str, Any]) -> None:
+        """Agrega una fila al historial de ciclos."""
+        values = (
+            info.get("cycle"),
+            f"{info.get('total_pnl', 0.0):+.2f}",
+            f"Bot {info.get('winner_id')}",
+            info.get("finished_at", ""),
+        )
+        self.tree_cycles.insert("", "end", values=values)
 
     def on_load_winner_for_sim(self) -> None:
         """Invoca el callback para cargar el bot ganador en modo SIM."""
