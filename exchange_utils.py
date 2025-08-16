@@ -119,7 +119,6 @@ class BinanceWS:
                     "bid_top_qty": top_bid_qty, "ask_top_qty": top_ask_qty,
                     "trade_flow": {"buy_ratio": buy_ratio, "streak": int(flow.get("streak",0))},
                 }
-        self._top_metrics_cache = {"ts": now, "symbols": symbols, "data": list(out)}
         return out
 
     def latency_ms(self) -> float:
