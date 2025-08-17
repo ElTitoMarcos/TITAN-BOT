@@ -17,11 +17,7 @@ from components.settings_frame import SettingsFrame
 from state.app_state import AppState as MassTestState
 from orchestrator.supervisor import Supervisor
 import exchange_utils.binance_check as binance_check
-
-BADGE_SIM = "🔧SIM"
-BADGE_LIVE = "⚡LIVE"
-BADGE_BUY = "🟢BUY"
-BADGE_SELL = "🔴SELL"
+from ui_styles import apply_order_tags
 
 class App(tb.Window):
 
@@ -190,16 +186,16 @@ class App(tb.Window):
         frm_open = ttk.Labelframe(left, text="Órdenes abiertas", padding=6)
         frm_open.grid(row=0, column=0, sticky="nsew", pady=(0,8))
         frm_open.rowconfigure(0, weight=1); frm_open.columnconfigure(0, weight=1)
-        cols_o = ("id","symbol","side","mode","price","qty_usd","age")
+        cols_o = ("id","symbol","price","qty_usd","age")
         self.tree_open = ttk.Treeview(frm_open, columns=cols_o, show="headings")
-        for c, txt, w, an in [("id","ID",160,"w"),
+        for c, txt, w, an in [
+                               ("id","ID",160,"w"),
                                ("symbol","Símbolo",160,"w"),
-                               ("side","Lado",90,"w"),
-                               ("mode","Modo",80,"w"),
                                ("price","Precio",120,"e"),
                                ("qty_usd","USD",100,"e"),
                                ("age","Edad(s)",80,"e")]:
             self.tree_open.heading(c, text=txt); self.tree_open.column(c, width=w, anchor=an, stretch=True)
+        apply_order_tags(self.tree_open)
         vsb2 = ttk.Scrollbar(frm_open, orient="vertical", command=self.tree_open.yview)
         self.tree_open.configure(yscrollcommand=vsb2.set)
         self.tree_open.grid(row=0, column=0, sticky="nsew"); vsb2.grid(row=0, column=1, sticky="ns")
@@ -208,15 +204,15 @@ class App(tb.Window):
         frm_closed = ttk.Labelframe(left, text="Órdenes cerradas", padding=6)
         frm_closed.grid(row=1, column=0, sticky="nsew")
         frm_closed.rowconfigure(0, weight=1); frm_closed.columnconfigure(0, weight=1)
-        cols_c = ("ts","symbol","side","mode","price","qty_usd")
+        cols_c = ("ts","symbol","price","qty_usd")
         self.tree_closed = ttk.Treeview(frm_closed, columns=cols_c, show="headings")
-        for c, txt, w, an in [("ts","Tiempo",170,"w"),
+        for c, txt, w, an in [
+                               ("ts","Tiempo",170,"w"),
                                ("symbol","Símbolo",160,"w"),
-                               ("side","Lado",90,"w"),
-                               ("mode","Modo",80,"w"),
                                ("price","Precio",120,"e"),
                                ("qty_usd","USD",100,"e")]:
             self.tree_closed.heading(c, text=txt); self.tree_closed.column(c, width=w, anchor=an, stretch=True)
+        apply_order_tags(self.tree_closed)
         vsb3 = ttk.Scrollbar(frm_closed, orient="vertical", command=self.tree_closed.yview)
         self.tree_closed.configure(yscrollcommand=vsb3.set)
         self.tree_closed.grid(row=0, column=0, sticky="nsew"); vsb3.grid(row=0, column=1, sticky="ns")
@@ -725,33 +721,43 @@ class App(tb.Window):
             self.tree_open.delete(i)
         now = time.time()*1000
         for o in orders:
-            side = f"{BADGE_BUY}" if o.get("side")=="buy" else f"{BADGE_SELL}"
-            mode = f"{BADGE_LIVE}" if o.get("mode")=="LIVE" else f"{BADGE_SIM}"
             age = max(0, (now - o.get('ts', now)) / 1000.0)
-            self.tree_open.insert("", "end", values=(
-                o.get("id",""),
-                o.get("symbol",""),
-                side,
-                mode,
-                f"{o.get('price',0.0):.8f}",
-                f"{o.get('qty_usd',0.0):.2f}",
-                f"{age:.1f}"
-            ))
+            tags = [
+                "side_buy" if o.get("side") == "buy" else "side_sell",
+                "mode_live" if o.get("mode") == "LIVE" else "mode_sim",
+            ]
+            self.tree_open.insert(
+                "",
+                "end",
+                values=(
+                    o.get("id", ""),
+                    o.get("symbol", ""),
+                    f"{o.get('price', 0.0):.8f}",
+                    f"{o.get('qty_usd', 0.0):.2f}",
+                    f"{age:.1f}",
+                ),
+                tags=tags,
+            )
 
     def _refresh_closed_orders(self, orders: List[Dict[str, Any]]):
         for i in self.tree_closed.get_children():
             self.tree_closed.delete(i)
         for o in orders[-200:]:
-            side = f"{BADGE_BUY}" if o.get("side")=="buy" else f"{BADGE_SELL}"
-            mode = f"{BADGE_LIVE}" if o.get("mode")=="LIVE" else f"{BADGE_SIM}"
-            self.tree_closed.insert("", "end", values=(
-                o.get("ts",""),
-                o.get("symbol",""),
-                side,
-                mode,
-                f"{o.get('price',0.0):.8f}",
-                f"{o.get('qty_usd',0.0):.2f}",
-            ))
+            tags = [
+                "side_buy" if o.get("side") == "buy" else "side_sell",
+                "mode_live" if o.get("mode") == "LIVE" else "mode_sim",
+            ]
+            self.tree_closed.insert(
+                "",
+                "end",
+                values=(
+                    o.get("ts", ""),
+                    o.get("symbol", ""),
+                    f"{o.get('price', 0.0):.8f}",
+                    f"{o.get('qty_usd', 0.0):.2f}",
+                ),
+                tags=tags,
+            )
 
 def launch():
     app = App()
