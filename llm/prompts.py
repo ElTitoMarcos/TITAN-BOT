@@ -54,3 +54,13 @@ Genera 10 NUEVAS variaciones cercanas (mutaciones locales pequeñas), todas dist
 Formato: igual que el prompt inicial (name + mutations). Devuelve JSON parseable.
 Evita duplicados: usa fingerprints (hashes) de conjuntos de parámetros que te paso.
 """
+
+PROMPT_META_GANADOR = """
+Te paso una lista de ganadores históricos. Cada elemento incluye cycle, bot_id,
+mutations y stats (orders, pnl, pnl_pct, wins, losses, runtime_s).
+Elige UN meta-ganador con criterio multi-métrica: prioriza pnl y pnl_pct, pero
+también win_rate alto y estabilidad. Penaliza pérdidas o comportamientos
+inconsistentes.
+Devuelve JSON: { "bot_id": <int>, "reason": "<breve explicación>" }.
+El JSON debe ser parseable. Nada más.
+"""
