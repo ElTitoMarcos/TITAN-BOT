@@ -231,6 +231,7 @@ class SQLiteStorage:
         "side",
         "qty",
         "price",
+        "resulting_fill_price",
         "fee_asset",
         "fee_amount",
         "ts",

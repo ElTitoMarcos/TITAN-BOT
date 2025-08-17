@@ -17,6 +17,9 @@ from llm import LLMClient
 from .models import BotConfig, BotStats, SupervisorEvent
 from .storage import SQLiteStorage
 from state.app_state import AppState
+from .models import BotConfig, BotStats, SupervisorEvent
+from .storage import SQLiteStorage
+from state.app_state import AppState
 
 class Supervisor:
     """Orquesta ciclos de bots ejecutados en paralelo."""
@@ -28,7 +31,6 @@ class Supervisor:
     ) -> None:
         self.storage = storage or SQLiteStorage()
         self.state = app_state or AppState.load()
-
         self._callbacks: List[Callable[[SupervisorEvent], None]] = []
         self.mass_tests_enabled = False
         self._thread: Optional[threading.Thread] = None

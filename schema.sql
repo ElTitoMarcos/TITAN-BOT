@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS orders (
     side TEXT,
     qty REAL,
     price REAL,
+    resulting_fill_price REAL,
     fee_asset TEXT,
     fee_amount REAL,
     ts TEXT,

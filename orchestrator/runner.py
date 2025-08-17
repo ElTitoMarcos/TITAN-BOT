@@ -49,6 +49,8 @@ class BotRunner:
             if orders_count + 2 > self.limits.get("max_orders", float("inf")):
                 break
             buy = await self.strategy.place_buy(params, sym)
+            expected_ticks = params.sell_k_ticks
+
             self.storage.save_order(
                 {
                     "order_id": buy.get("id"),
@@ -58,8 +60,24 @@ class BotRunner:
                     "side": "buy",
                     "qty": buy.get("amount"),
                     "price": buy.get("price"),
+                    "resulting_fill_price": None,
+                    "fee_asset": None,
+                    "fee_amount": None,
                     "ts": datetime.utcnow().isoformat(),
                     "status": "open",
+                    "pnl": None,
+                    "pnl_pct": None,
+                    "expected_profit_ticks": expected_ticks,
+                    "actual_profit_ticks": None,
+                    "spread_ticks": buy.get("spread_ticks"),
+                    "imbalance_pct": buy.get("imbalance_pct"),
+                    "top3_depth": json.dumps(buy.get("top3_depth")) if buy.get("top3_depth") else None,
+                    "book_hash": buy.get("book_hash"),
+                    "latency_ms": buy.get("latency_ms"),
+                    "cancel_replace_count": 0,
+                    "time_in_force": buy.get("time_in_force"),
+                    "hold_time_s": None,
+
                     "raw_json": json.dumps(buy),
                 }
             )
@@ -73,8 +91,23 @@ class BotRunner:
                     "side": "sell",
                     "qty": sell.get("amount"),
                     "price": sell.get("price"),
+                    "resulting_fill_price": None,
+                    "fee_asset": None,
+                    "fee_amount": None,
                     "ts": datetime.utcnow().isoformat(),
                     "status": "open",
+                    "pnl": None,
+                    "pnl_pct": None,
+                    "expected_profit_ticks": expected_ticks,
+                    "actual_profit_ticks": None,
+                    "spread_ticks": buy.get("spread_ticks"),
+                    "imbalance_pct": buy.get("imbalance_pct"),
+                    "top3_depth": None,
+                    "book_hash": None,
+                    "latency_ms": None,
+                    "cancel_replace_count": 0,
+                    "time_in_force": sell.get("time_in_force"),
+                    "hold_time_s": None,
                     "raw_json": json.dumps(sell),
                 }
             )
@@ -91,6 +124,10 @@ class BotRunner:
                 wins += 1
             else:
                 losses += 1
+            tick = buy.get("tick_size") or 1
+            expected_ticks = params.sell_k_ticks
+            actual_ticks = int(round((sell["price"] - buy["price"]) / tick))
+
             for side, order in (("buy", buy), ("sell", sell)):
                 data = {
                     "order_id": order.get("id"),
@@ -100,9 +137,24 @@ class BotRunner:
                     "side": side,
                     "qty": order.get("amount"),
                     "price": order.get("price"),
+                    "resulting_fill_price": order.get("price"),
+                    "fee_asset": (order.get("fee") or {}).get("currency"),
+                    "fee_amount": (order.get("fee") or {}).get("cost"),
                     "ts": datetime.utcnow().isoformat(),
                     "status": "filled",
                     "pnl": upd.get("pnl") if side == "sell" else None,
+                    "pnl_pct": upd.get("pnl_pct") if side == "sell" else None,
+                    "expected_profit_ticks": expected_ticks,
+                    "actual_profit_ticks": actual_ticks if side == "sell" else None,
+                    "spread_ticks": upd.get("spread_ticks"),
+                    "imbalance_pct": upd.get("imbalance_pct"),
+                    "top3_depth": json.dumps(upd.get("top3_depth")) if upd.get("top3_depth") else None,
+                    "book_hash": upd.get("book_hash"),
+                    "latency_ms": upd.get("latency_ms"),
+                    "cancel_replace_count": upd.get("cancel_replace_count"),
+                    "time_in_force": order.get("time_in_force"),
+                    "hold_time_s": upd.get("hold_time_s"),
+
                     "raw_json": json.dumps(order),
                 }
                 self.storage.save_order(data)
