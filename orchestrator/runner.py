@@ -159,6 +159,7 @@ class BotRunner:
                         "buy_submitted",
                         {"symbol": sym, "price": buy_price, "qty": amount},
                     )
+
                     if hasattr(self.strategy, "monitor_buy_sim"):
                         res = await self.strategy.monitor_buy_sim(
                             params, sym, buy_price, amount, tick, self.hub
@@ -198,6 +199,7 @@ class BotRunner:
                 amount = res["filled_qty"]
                 reason_codes = [e.get("type") for e in res.get("monitor_events", [])]
                 buy_metrics.update(
+
                     {
                         "actual_fill_time_s": res.get("actual_fill_time_s"),
                         "monitor_events": res.get("monitor_events"),
@@ -273,6 +275,7 @@ class BotRunner:
                         "sell_submitted",
                         {"symbol": sym, "price": sell_price, "qty": amount},
                     )
+
                     if hasattr(self.strategy, "monitor_sell_sim"):
                         res = await self.strategy.monitor_sell_sim(
                             params,
@@ -317,6 +320,7 @@ class BotRunner:
                 sell_vwap = res["avg_price"]
                 reason_codes_sell = [e.get("type") for e in res.get("monitor_events", [])]
                 sell_metrics.update(
+
                     {
                         "actual_fill_time_s": res.get("actual_fill_time_s"),
                         "monitor_events": res.get("monitor_events"),

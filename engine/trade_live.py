@@ -169,6 +169,7 @@ def parse_fills(
                 "fee_asset": asset,
             }
         )
+
     fee = order.get("fee")
     if isinstance(fee, dict):
         commission = float(fee.get("cost") or fee.get("commission") or commission)
