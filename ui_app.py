@@ -363,6 +363,7 @@ class App(tb.Window):
                 pass
         try:
             self._supervisor.llm.set_api_key(oai)
+
         except Exception:
             pass
         try:
