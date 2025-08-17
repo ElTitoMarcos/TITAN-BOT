@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from .models import BotConfig, BotStats, SupervisorEvent
@@ -47,7 +47,7 @@ class BotRunner:
         ts: Optional[float] = None,
     ) -> None:
         event = SupervisorEvent(
-            ts=datetime.utcfromtimestamp(ts) if ts else datetime.utcnow(),
+            ts=datetime.fromtimestamp(ts, timezone.utc) if ts else datetime.now(timezone.utc),
             level=level,
             scope="bot",
             cycle=self.config.cycle,
@@ -127,12 +127,12 @@ class BotRunner:
                 buy_filled = False
                 buy_attempts = 0
                 while buy_attempts < max_retries and not buy_filled:
-                    phase_ts = {"SELECT_PAIR": datetime.utcnow().isoformat()}
+                    phase_ts = {"SELECT_PAIR": datetime.now(timezone.utc).isoformat()}
                     self._emit("INFO", "pair_selected", {"symbol": sym, "data": buy_data})
                     amount = buy_data["amount"]
                     tick = buy_data["tick_size"]
                     buy_price = buy_data["price"]
-                    phase_ts["PREP_BUY"] = datetime.utcnow().isoformat()
+                    phase_ts["PREP_BUY"] = datetime.now(timezone.utc).isoformat()
 
                     book_full = self.hub.get_order_book(sym, top=100)
                     trade_rate = self.hub.get_trade_rate(sym, buy_price, "buy")
@@ -156,7 +156,7 @@ class BotRunner:
                         except Exception:
                             self._emit("ERROR", "buy_submit_failed", {"symbol": sym})
                             break
-                        phase_ts["SUBMIT_BUY"] = datetime.utcnow().isoformat()
+                        phase_ts["SUBMIT_BUY"] = datetime.now(timezone.utc).isoformat()
                         self._emit(
                             "INFO",
                             "buy_submitted",
@@ -171,7 +171,7 @@ class BotRunner:
                             params, sym, order.get("id"), buy_price, amount, tick, self.hub
                         )
                     else:
-                        phase_ts["SUBMIT_BUY"] = datetime.utcnow().isoformat()
+                        phase_ts["SUBMIT_BUY"] = datetime.now(timezone.utc).isoformat()
                         self._emit(
                             "INFO",
                             "buy_submitted",
@@ -194,14 +194,14 @@ class BotRunner:
                                 "order_id": None,
                                 "fills": [],
                             }
-                    phase_ts["MONITOR_BUY"] = datetime.utcnow().isoformat()
+                    phase_ts["MONITOR_BUY"] = datetime.now(timezone.utc).isoformat()
                     if not res or res.get("aborted") or res.get("filled_qty", 0) < amount:
                         reason_codes = [
                             e.get("type") for e in (res or {}).get("monitor_events", [])
                         ]
                         if "timeout_cancel" in reason_codes:
                             timeouts += 1
-                        phase_ts["ABORT"] = datetime.utcnow().isoformat()
+                        phase_ts["ABORT"] = datetime.now(timezone.utc).isoformat()
                         self._emit(
                             "WARNING",
                             "buy_aborted",
@@ -278,7 +278,7 @@ class BotRunner:
                     "resulting_fill_price": buy_vwap,
                     "fee_asset": buy_metrics.get("commission_asset"),
                     "fee_amount": buy_metrics.get("commission_paid"),
-                    "ts": datetime.utcnow().isoformat(),
+                    "ts": datetime.now(timezone.utc).isoformat(),
                     "status": "filled",
                     "pnl": None,
                     "pnl_pct": None,
@@ -420,7 +420,7 @@ class BotRunner:
                 except Exception:
                     self._emit("ERROR", "sell_submit_failed", {"symbol": sym})
                     break
-                phase_ts["SUBMIT_SELL"] = datetime.utcnow().isoformat()
+                phase_ts["SUBMIT_SELL"] = datetime.now(timezone.utc).isoformat()
                 self._emit(
                     "INFO",
                     "sell_submitted",
@@ -442,7 +442,7 @@ class BotRunner:
                     buy_vwap + tick * params.commission_buffer_ticks,
                 )
             else:
-                phase_ts["SUBMIT_SELL"] = datetime.utcnow().isoformat()
+                phase_ts["SUBMIT_SELL"] = datetime.now(timezone.utc).isoformat()
                 self._emit(
                     "INFO",
                     "sell_submitted",
@@ -471,14 +471,14 @@ class BotRunner:
                         "order_id": None,
                         "fills": [],
                     }
-            phase_ts["MONITOR_SELL"] = datetime.utcnow().isoformat()
+            phase_ts["MONITOR_SELL"] = datetime.now(timezone.utc).isoformat()
             if not res or res.get("aborted") or res.get("filled_qty", 0) < amount:
                 reason_codes = [
                     e.get("type") for e in (res or {}).get("monitor_events", [])
                 ]
                 if "timeout_cancel" in reason_codes:
                     self.timeouts += 1
-                phase_ts["ABORT"] = datetime.utcnow().isoformat()
+                phase_ts["ABORT"] = datetime.now(timezone.utc).isoformat()
                 self._emit(
                     "WARNING",
                     "sell_aborted",
@@ -567,7 +567,7 @@ class BotRunner:
             "resulting_fill_price": sell_vwap,
             "fee_asset": sell_metrics.get("commission_asset"),
             "fee_amount": sell_metrics.get("commission_paid"),
-            "ts": datetime.utcnow().isoformat(),
+            "ts": datetime.now(timezone.utc).isoformat(),
             "status": "filled",
             "pnl": profit,
             "pnl_pct": pnl_pct,
@@ -592,7 +592,7 @@ class BotRunner:
         }
 
         self.storage.save_order(sell_record)
-        phase_ts["DONE"] = datetime.utcnow().isoformat()
+        phase_ts["DONE"] = datetime.now(timezone.utc).isoformat()
         self._emit(
             "INFO",
             "order_complete",
