@@ -356,6 +356,26 @@ class SQLiteStorage:
         return dict(row)
 
     # ------------------------------------------------------------------
+    def list_cycle_summaries(self) -> List[Dict[str, Any]]:
+        """Return basic info for all cycles including winner reasons.
+
+        This is used by the UI to repopulate historical data and show the
+        full rationale behind each winning bot after restarting the
+        application."""
+
+        query = (
+            "SELECT c.cycle_id, c.finished_at, c.winner_bot_id, c.winner_reason,"
+            "       SUM(bs.pnl) AS total_pnl "
+            "FROM cycles c "
+            "LEFT JOIN bot_stats bs ON bs.cycle_id = c.cycle_id "
+            "GROUP BY c.cycle_id "
+            "ORDER BY c.cycle_id"
+        )
+        with self._lock:
+            rows = self.conn.execute(query).fetchall()
+        return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------------
     def list_winners(self) -> List[Dict[str, Any]]:
         """Return historical cycle winners with their mutations and stats."""
         query = """
