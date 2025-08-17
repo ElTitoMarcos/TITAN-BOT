@@ -1,7 +1,6 @@
 """Parameter driven implementation of the original BTC strategy."""
 from __future__ import annotations
 
-import asyncio
 import time
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -18,7 +17,7 @@ class StrategyBase:
     async def select_pairs(self, params: Params) -> List[str]:
         """Return symbols that meet profitability and volume constraints."""
         markets = await self.exchange.get_markets()
-        symbols: List[Tuple[str, float]] = []
+        candidates: List[Tuple[str, float, float, float]] = []
         for sym, info in markets.items():
             if not sym.endswith("BTC"):
                 continue
@@ -30,11 +29,14 @@ class StrategyBase:
             if vol < params.min_vol_btc_24h:
                 continue
             fees_ticks = (last * fees) / tick if tick else 0.0
-            if 1 <= fees_ticks + params.commission_buffer_ticks:
+            if params.sell_k_ticks <= fees_ticks + params.commission_buffer_ticks:
                 continue
-            symbols.append((sym, last))
-        symbols.sort(key=lambda x: x[1])
-        return [s for s, _ in symbols]
+            book = await self.exchange.get_order_book(sym)
+            spread = compute_spread_ticks(book, tick) if book else float("inf")
+            imbalance = compute_imbalance(book) if book else 0.0
+            candidates.append((sym, last, spread, imbalance))
+        candidates.sort(key=lambda x: (x[2], -x[3], x[1]))
+        return [s for s, *_ in candidates]
 
     async def analyze_book(
         self, params: Params, symbol: str, book: Dict[str, Any], mode: str = "SIM"
@@ -131,7 +133,3 @@ class StrategyBase:
             "amount": amount,
             "tick_size": tick,
         }
-
-        tick = buy_order.get("tick_size", 0.0)
-        price = buy_order["price"] + tick * params.sell_k_ticks
-        return {"symbol": buy_order["symbol"], "price": price, "amount": buy_order["amount"], "tick_size": tick}

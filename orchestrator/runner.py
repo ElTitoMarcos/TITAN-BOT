@@ -10,7 +10,7 @@ from typing import Any, Callable, Dict, List, Optional
 from .models import BotConfig, BotStats
 from engine.strategy_base import StrategyBase
 from engine.strategy_params import Params, map_mutations_to_params
-from engine.ob_utils import try_fill_limit
+from engine.ob_utils import estimate_fill_time
 from exchange_utils.orderbook_service import MarketDataHub, market_data_hub
 
 
@@ -84,9 +84,8 @@ class BotRunner:
                 amount = buy_data["amount"]
                 tick = buy_data["tick_size"]
                 buy_price = buy_data["price"]
-                buy_start = time.time()
                 buy_vwap = None
-                buy_cancels = 0
+                buy_metrics = None
 
                 if self.mode == "LIVE":
                     from engine.trade_live import (
@@ -124,27 +123,30 @@ class BotRunner:
                         continue
                     buy_price = float(order.get("price", buy_price))
                 else:
-                    while time.time() - buy_start < params.max_wait_s:
-                        b = self.hub.get_order_book(sym)
-                        if b:
-                            qty, vwap = try_fill_limit(b, "buy", buy_price, amount)
-                            if qty >= amount and vwap is not None:
-                                buy_vwap = vwap
-                                break
-                        buy_price += tick
-                        buy_cancels += 1
-                        await asyncio.sleep(0.1)
-
-                    if buy_vwap is None:
+                    book = self.hub.get_order_book(sym, top=100)
+                    trade_rate = self.hub.get_trade_rate(sym, buy_price, "buy")
+                    est = (
+                        estimate_fill_time(book, "buy", buy_price, amount, trade_rate)
+                        if book
+                        else None
+                    )
+                    if not est or est[1] > params.max_wait_s:
                         continue
+                    queue_qty, t_est = est
+                    buy_vwap = buy_price
+                    buy_metrics = {
+                        "expected_fill_time_s": t_est,
+                        "actual_fill_time_s": t_est,
+                        "queue_ahead_qty": queue_qty,
+                        "trade_rate_qty_per_s": trade_rate,
+                    }
 
                 sell_order = self.strategy.build_sell_order(
                     params, {**buy_data, "price": buy_price}, mode=self.mode
                 )
                 sell_price = sell_order["price"]
                 sell_vwap = None
-                sell_cancels = 0
-                sell_start = time.time()
+                sell_metrics = None
 
                 if self.mode == "LIVE":
                     try:
@@ -180,21 +182,27 @@ class BotRunner:
                         continue
                     sell_price = float(sorder.get("price", sell_price))
                 else:
-                    while time.time() - sell_start < params.max_wait_s:
-                        b2 = self.hub.get_order_book(sym)
-                        if b2:
-                            qty, vwap = try_fill_limit(b2, "sell", sell_price, amount)
-                            if qty >= amount and vwap is not None:
-                                sell_vwap = vwap
-                                break
-                        sell_price -= tick
-                        sell_cancels += 1
-                        await asyncio.sleep(0.1)
-
-                    if sell_vwap is None:
+                    book2 = self.hub.get_order_book(sym, top=100)
+                    trade_rate2 = self.hub.get_trade_rate(sym, sell_price, "sell")
+                    est2 = (
+                        estimate_fill_time(book2, "sell", sell_price, amount, trade_rate2)
+                        if book2
+                        else None
+                    )
+                    if not est2 or est2[1] > params.max_wait_s:
                         continue
+                    queue_qty2, t_est2 = est2
+                    sell_vwap = sell_price
+                    sell_metrics = {
+                        "expected_fill_time_s": t_est2,
+                        "actual_fill_time_s": t_est2,
+                        "queue_ahead_qty": queue_qty2,
+                        "trade_rate_qty_per_s": trade_rate2,
+                    }
 
-                hold_time = time.time() - buy_start
+                hold_time = (buy_metrics or {}).get("actual_fill_time_s", 0.0) + (
+                    sell_metrics or {}
+                ).get("actual_fill_time_s", 0.0)
                 profit = (sell_vwap - buy_vwap) * amount
                 pnl += profit
                 if profit >= 0:
@@ -233,10 +241,16 @@ class BotRunner:
                     "top3_depth": top3_json,
                     "book_hash": buy_data.get("book_hash"),
                     "latency_ms": buy_data.get("latency_ms"),
-                    "cancel_replace_count": buy_cancels,
+                    "cancel_replace_count": 0,
                     "time_in_force": None,
                     "hold_time_s": None,
-                    "raw_json": json.dumps({"price": buy_price, "amount": amount}),
+                    "raw_json": json.dumps(
+                        {
+                            "price": buy_price,
+                            "amount": amount,
+                            **(buy_metrics or {}),
+                        }
+                    ),
                 }
 
                 sell_record = {
@@ -261,10 +275,16 @@ class BotRunner:
                     "top3_depth": None,
                     "book_hash": None,
                     "latency_ms": None,
-                    "cancel_replace_count": sell_cancels,
+                    "cancel_replace_count": 0,
                     "time_in_force": None,
                     "hold_time_s": hold_time,
-                    "raw_json": json.dumps({"price": sell_price, "amount": amount}),
+                    "raw_json": json.dumps(
+                        {
+                            "price": sell_price,
+                            "amount": amount,
+                            **(sell_metrics or {}),
+                        }
+                    ),
                 }
 
                 self.storage.save_order(buy_record)
