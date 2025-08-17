@@ -12,6 +12,7 @@ from llm import LLMClient as MassLLMClient
 from components.testeos_frame import TesteosFrame
 from components.auth_frame import AuthFrame
 from components.info_frame import InfoFrame, clean_text
+from components.settings_frame import SettingsFrame
 
 from state.app_state import AppState as MassTestState
 from orchestrator.supervisor import Supervisor
@@ -108,6 +109,8 @@ class App(tb.Window):
         self._build_ui()
         # Instanciar LLM y supervisor después de construir UI para cablear logs
         llm_client = MassLLMClient(on_log=self.info_frame.append_llm_log)
+        # guardar referencia para futuras consultas (meta-ganador, etc.)
+        self.llm_client = llm_client
         self._supervisor = Supervisor(
             app_state=self.mass_state,
             llm_client=llm_client,
@@ -161,15 +164,20 @@ class App(tb.Window):
         self.lbl_pnl.grid(row=1, column=2, sticky="e", padx=5)
         self.lbl_bal.grid(row=1, column=3, sticky="e", padx=5)
 
-        # Pestañas principales
-        self.notebook = ttk.Notebook(self)
-        self.notebook.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=(10,10), pady=(0,8))
+        # Panel fijo para testeos masivos
         self.testeos_frame = TesteosFrame(
-            self.notebook,
+            self,
             self.on_toggle_mass_tests,
             self.on_load_winner_for_sim,
         )
-        self.notebook.add(self.testeos_frame, text="Testeos Masivos")
+        self.testeos_frame.grid(
+            row=1,
+            column=0,
+            columnspan=2,
+            sticky="nsew",
+            padx=(10, 10),
+            pady=(0, 8),
+        )
 
         # Panel inferior izquierdo para órdenes
         left = ttk.Frame(self, padding=(10,0,10,10))
@@ -223,29 +231,20 @@ class App(tb.Window):
 
         ttk.Label(right, text="Ajustes").grid(row=0, column=0, sticky="w", pady=(0,6))
 
-        # Tamaños + toggle mínimo + apply
-        frm_size = ttk.Labelframe(right, text="Tamaño por operación (USD)", padding=8)
-        frm_size.grid(row=1, column=0, sticky="ew", pady=6)
-        frm_size.columnconfigure(1, weight=1)
-        self.var_size_sim = tb.DoubleVar(value=self.cfg.size_usd_sim)
-        self.var_size_live = tb.DoubleVar(value=self.cfg.size_usd_live)
-        self.var_use_min_bin = tb.BooleanVar(value=False)
-        ttk.Label(frm_size, text="SIM").grid(row=0, column=0, sticky="w")
-        self.ent_size_sim = ttk.Entry(frm_size, textvariable=self.var_size_sim, width=14)
-        self.ent_size_sim.grid(row=0, column=1, sticky="ew")
-        ttk.Label(frm_size, text="LIVE").grid(row=1, column=0, sticky="w")
-        self.ent_size_live = ttk.Entry(frm_size, textvariable=self.var_size_live, width=14)
-        self.ent_size_live.grid(row=1, column=1, sticky="ew")
-        ttk.Button(frm_size, text="Aplicar tamaño", command=self._apply_sizes).grid(row=0, column=2, rowspan=2, padx=6)
-        self.lbl_min_marker = ttk.Label(frm_size, text="Mínimo Binance: --")
-        self.lbl_min_marker.grid(row=2, column=0, columnspan=2, sticky="w", pady=(4,0))
-        ttk.Checkbutton(
-            frm_size,
-            text="Min Binance",
-            variable=self.var_use_min_bin,
-            style="info.Switch",
-            command=self._toggle_min_binance,
-        ).grid(row=2, column=2, padx=6, pady=(4,0))
+        # Tamaños + toggle mínimo + apply (SettingsFrame)
+        self.settings_frame = SettingsFrame(
+            right,
+            self._apply_sizes,
+            self._toggle_min_binance,
+            self.cfg,
+        )
+        self.settings_frame.grid(row=1, column=0, sticky="ew", pady=6)
+        self.var_size_sim = self.settings_frame.var_size_sim
+        self.var_size_live = self.settings_frame.var_size_live
+        self.var_use_min_bin = self.settings_frame.var_use_min_bin
+        self.ent_size_sim = self.settings_frame.ent_size_sim
+        self.ent_size_live = self.settings_frame.ent_size_live
+        self.lbl_min_marker = self.settings_frame.lbl_min_marker
 
         # API keys and verification badges
         self.auth_frame = AuthFrame(right, self._start_confirm_apis)
@@ -471,14 +470,38 @@ class App(tb.Window):
     def _apply_sizes(self):
 
         """Aplica los tamaños por operación para SIM y LIVE."""
+        margin = 1.0
+        min_usd = 0.0
         try:
-            if self._engine_sim:
-                self._engine_sim.cfg.size_usd_sim = float(self.var_size_sim.get())
+            self._ensure_exchange()
+            min_usd = self.exchange.global_min_notional_usd()
         except Exception:
             pass
+        # SIM size
         try:
+            size_sim = float(self.var_size_sim.get())
+            eff_sim = max(size_sim, min_usd + margin)
+            if eff_sim != size_sim:
+                self.var_size_sim.set(eff_sim)
+                self.log_append(
+                    f"[ENGINE] Tamaño SIM ajustado a {eff_sim:.2f} USD (mínimo {min_usd:.2f})"
+                )
+            if self._engine_sim:
+                self._engine_sim.cfg.size_usd_sim = eff_sim
+        except Exception:
+            pass
+        # LIVE size
+        try:
+            size_live = float(self.var_size_live.get())
+            eff_live = max(size_live, min_usd + margin)
+            if eff_live != size_live:
+                self.var_size_live.set(eff_live)
+                self.log_append(
+                    f"[ENGINE] Tamaño LIVE ajustado a {eff_live:.2f} USD (mínimo {min_usd:.2f})"
+                )
             if self._engine_live:
-                self._engine_live.cfg.size_usd_live = float(self.var_size_live.get())
+                self._engine_live.cfg.size_usd_live = eff_live
+            self._supervisor.set_order_size_usd(eff_live)
         except Exception:
             pass
 
@@ -488,7 +511,8 @@ class App(tb.Window):
         if use_min:
             try:
                 self._ensure_exchange()
-                min_usd = self.exchange.global_min_notional_usd()
+                margin = 1.0
+                min_usd = self.exchange.global_min_notional_usd() + margin
                 self.var_size_live.set(min_usd)
                 self.ent_size_live.configure(state="disabled")
                 self.lbl_min_marker.configure(text=f"Mínimo Binance: {min_usd:.2f} USDT")
@@ -498,6 +522,7 @@ class App(tb.Window):
                 self.lbl_min_marker.configure(text="Mínimo Binance: --")
         else:
             self.ent_size_live.configure(state="normal")
+        self._apply_sizes()
 
     def _apply_min_orders(self):
         """Aplica el mínimo de órdenes requerido para la sesión de test."""
@@ -534,20 +559,48 @@ class App(tb.Window):
             self._supervisor.stop_mass_tests()
 
     def on_load_winner_for_sim(self) -> None:
-        """Carga la configuración ganadora en el bot SIM."""
-        if not self._winner_cfg:
-            self.log_append("[TEST] No hay ganador disponible")
+        """Selecciona meta-ganador histórico y lo carga en el bot SIM."""
+        try:
+            winners = self._supervisor.storage.list_winners()
+        except Exception:
+            winners = []
+
+        if not winners:
+            self.log_append("[TEST] No hay ganadores históricos")
             return
+
+        # Pedir al LLM que elija el meta-ganador
+        try:
+            res = self.llm_client.pick_meta_winner(winners)
+            bot_id = res.get("bot_id")
+            reason = res.get("reason", "")
+        except Exception:
+            bot_id = None
+            reason = ""
+
+        if bot_id is None:
+            self.log_append("[TEST] No se pudo determinar meta-ganador")
+            return
+
+        cfg = self._supervisor.storage.get_bot(int(bot_id))
+        if not cfg:
+            self.log_append("[TEST] Configuración del ganador no encontrada")
+            return
+
+        # Guardar para posible uso posterior (aplicar a LIVE)
+        self._winner_cfg = cfg
+
         try:
             if self._engine_sim and self._engine_sim.is_alive():
                 self._engine_sim.stop()
-            self._engine_sim = load_sim_config(self._winner_cfg.mutations)
+            self._engine_sim = load_sim_config(cfg.mutations)
             self._engine_sim.start()
             self.var_bot_sim.set(True)
             self.lbl_state_sim.configure(text="SIM: ON", bootstyle=SUCCESS)
-            self.log_append("[TEST] Bot ganador cargado en modo SIM")
+            self.info_frame.append_llm_log("meta_winner", {"bot_id": bot_id, "reason": reason})
+            self.log_append("[TEST] Bot meta-ganador cargado en modo SIM")
         except Exception as exc:
-            self.log_append(f"[TEST] Error al cargar ganador: {exc}")
+            self.log_append(f"[TEST] Error al cargar meta-ganador: {exc}")
 
     # ------------------- Log helpers -------------------
     def log_append(self, msg: str):

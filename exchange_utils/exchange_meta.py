@@ -1,7 +1,7 @@
 import math
 import threading
 import time
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, Callable
 
 import requests
 
@@ -57,6 +57,25 @@ class ExchangeMeta:
         with self._lock:
             self._cache[symbol] = (result, now + self.ttl)
         return result
+
+    # ------------------------------------------------------------------
+    def get_min_notional(self, symbol: str) -> Tuple[float, str]:
+        """Return the ``minNotional`` value and its quote currency.
+
+        The currency is inferred from the trading symbol assuming the quote
+        asset occupies the tail of the symbol name (e.g. ``ETHBTC`` -> ``BTC``).
+        If the value is missing it defaults to ``0`` and ``USDT``.
+        """
+
+        filters = self.get_symbol_filters(symbol)
+        quote = symbol[-4:] if symbol.upper().endswith("USDT") else symbol[-3:]
+        return float(filters.get("minNotional", 0.0)), quote
+
+    def min_notional_usd(self, symbol: str, quote_to_usd: Callable[[str], float]) -> float:
+        """Return the minimum notional for ``symbol`` expressed in USD."""
+
+        val, quote = self.get_min_notional(symbol)
+        return float(val) * float(quote_to_usd(quote))
 
     # ------------------------------------------------------------------
     def round_price_qty(

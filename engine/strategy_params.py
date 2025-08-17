@@ -27,6 +27,7 @@ class Params:
     """Concrete parameters consumed by :mod:`strategy_base`."""
 
     order_size_usd: float = 50.0
+    min_notional_margin: float = 1.0
     buy_level_rule: str = "accum_bids"
     sell_k_ticks: int = 1
     max_wait_s: int = 30
@@ -42,7 +43,9 @@ def _clamp(value: float, low: float, high: float) -> float:
     return max(low, min(high, value))
 
 
-def map_mutations_to_params(mutations: Dict[str, Any] | None) -> Params:
+def map_mutations_to_params(
+    mutations: Dict[str, Any] | None, order_size_usd: float | None = None
+) -> Params:
     """Translate mutation dictionaries into :class:`Params`.
 
     Unknown keys are ignored. Basic validation/clamping is applied so the
@@ -56,6 +59,12 @@ def map_mutations_to_params(mutations: Dict[str, Any] | None) -> Params:
     if "order_size_usd" in mutations:
         try:
             params.order_size_usd = float(mutations["order_size_usd"])
+        except (TypeError, ValueError):
+            pass
+
+    if "min_notional_margin" in mutations:
+        try:
+            params.min_notional_margin = float(mutations["min_notional_margin"])
         except (TypeError, ValueError):
             pass
 
@@ -92,6 +101,12 @@ def map_mutations_to_params(mutations: Dict[str, Any] | None) -> Params:
         params.risk_limits.per_pair_exposure_usd = float(
             rl.get("per_pair_exposure_usd", params.risk_limits.per_pair_exposure_usd)
         )
+
+    if order_size_usd is not None:
+        try:
+            params.order_size_usd = float(order_size_usd)
+        except (TypeError, ValueError):
+            pass
 
     return params
 
