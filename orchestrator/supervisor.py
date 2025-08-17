@@ -26,6 +26,7 @@ class Supervisor:
         storage: Optional[SQLiteStorage] = None,
         app_state: Optional[AppState] = None,
         llm_client: Optional[LLMClient] = None,
+        mode: str = "SIM",
     ) -> None:
         """Crea el supervisor.
 
@@ -42,6 +43,7 @@ class Supervisor:
         self.storage = storage or SQLiteStorage()
         self.state = app_state or AppState.load()
         self.llm = llm_client or LLMClient()
+        self.mode = mode.upper()
         self._callbacks: List[Callable[[SupervisorEvent], None]] = []
         self.mass_tests_enabled = False
         self._thread: Optional[threading.Thread] = None

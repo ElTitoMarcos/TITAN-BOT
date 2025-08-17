@@ -1,14 +1,27 @@
+import math
 import threading
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import requests
 
 EXCHANGE_INFO_URL = "https://api.binance.com/api/v3/exchangeInfo"
 
 
+def _round_step(value: float, step: float) -> float:
+    """Round ``value`` down to the nearest multiple of ``step``."""
+    if step and step > 0:
+        return math.floor(float(value) / float(step)) * float(step)
+    return float(value)
+
+
 class ExchangeMeta:
-    """Cache for Binance exchange metadata (symbol filters)."""
+    """Cache for Binance exchange metadata (symbol filters).
+
+    This helper also exposes small rounding utilities so other modules can
+    validate prices and quantities against the exchange filters in a consistent
+    way.
+    """
 
     def __init__(self, ttl: float = 600.0, session: Optional[requests.Session] = None) -> None:
         self.ttl = ttl
@@ -45,5 +58,22 @@ class ExchangeMeta:
             self._cache[symbol] = (result, now + self.ttl)
         return result
 
+    # ------------------------------------------------------------------
+    def round_price_qty(
+        self, symbol: str, price: float, qty: float
+    ) -> Tuple[float, float, Dict[str, Any]]:
+        """Round ``price`` and ``qty`` to the symbol filters.
+
+        Returns the rounded ``price`` and ``qty`` along with the filter dict.
+        Raises ``ValueError`` if the resulting notional is below ``minNotional``.
+        """
+
+        filters = self.get_symbol_filters(symbol)
+        price = _round_step(price, filters.get("priceIncrement", 0))
+        qty = _round_step(qty, filters.get("stepSize", 0))
+        min_notional = float(filters.get("minNotional", 0))
+        if min_notional and price * qty < min_notional:
+            raise ValueError("notional below minNotional")
+        return price, qty, filters
 
 exchange_meta = ExchangeMeta()

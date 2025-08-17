@@ -7,6 +7,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from .strategy_params import Params
 from .ob_utils import book_hash, compute_imbalance, compute_spread_ticks
+from exchange_utils.exchange_meta import exchange_meta
 
 class StrategyBase:
     """Execute the base BTC strategy under mutable parameters."""
@@ -36,7 +37,8 @@ class StrategyBase:
         return [s for s, _ in symbols]
 
     async def analyze_book(
-        self, params: Params, symbol: str, book: Dict[str, Any]
+        self, params: Params, symbol: str, book: Dict[str, Any], mode: str = "SIM"
+
     ) -> Optional[Dict[str, Any]]:
         """Evaluate order book and return buy order data if conditions met.
 
@@ -70,7 +72,18 @@ class StrategyBase:
 
         info = await self.exchange.get_market(symbol)
         tick = float(info.get("price_increment", 1e-8))
-        amount = params.order_size_usd / ask_price if ask_price else 0.0
+        raw_amount = params.order_size_usd / ask_price if ask_price else 0.0
+        if mode.upper() == "LIVE":
+            try:
+                ask_price, amount, filters = exchange_meta.round_price_qty(
+                    symbol, ask_price, raw_amount
+                )
+            except ValueError:
+                return None
+            tick = float(filters.get("priceIncrement", tick))
+        else:
+            amount = raw_amount
+
         spread_ticks = compute_spread_ticks(book, tick)
         top3 = {"bids": bids[:3], "asks": asks[:3]}
         latency_ms = int((time.time() - book.get("ts", time.time())) * 1000)
@@ -87,9 +100,23 @@ class StrategyBase:
         }
 
     def build_sell_order(
-        self, params: Params, buy_order: Dict[str, Any]
+        self, params: Params, buy_order: Dict[str, Any], mode: str = "SIM"
     ) -> Dict[str, Any]:
         """Return a sell order ``sell_k_ticks`` above the buy price."""
+
+        tick = buy_order.get("tick_size", 0.0)
+        price = buy_order["price"] + tick * params.sell_k_ticks
+        amount = buy_order["amount"]
+        if mode.upper() == "LIVE":
+            price, amount, _ = exchange_meta.round_price_qty(
+                buy_order["symbol"], price, amount
+            )
+        return {
+            "symbol": buy_order["symbol"],
+            "price": price,
+            "amount": amount,
+            "tick_size": tick,
+        }
 
         tick = buy_order.get("tick_size", 0.0)
         price = buy_order["price"] + tick * params.sell_k_ticks

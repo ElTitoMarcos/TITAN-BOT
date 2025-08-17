@@ -26,6 +26,8 @@ class BotRunner:
         storage: Any,
         ui_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
         hub: MarketDataHub = market_data_hub,
+        mode: str = "SIM",
+
     ) -> None:
         self.config = config
         self.limits = limits
@@ -34,6 +36,7 @@ class BotRunner:
         self.storage = storage
         self.ui_callback = ui_callback or (lambda _: None)
         self.hub = hub
+        self.mode = mode.upper()
 
     async def run(self) -> BotStats:
         """Execute the bot respecting the provided limits."""
@@ -71,7 +74,10 @@ class BotRunner:
                     await asyncio.sleep(0.1)
                     continue
 
-                buy_data = await self.strategy.analyze_book(params, sym, book)
+                buy_data = await self.strategy.analyze_book(
+                    params, sym, book, mode=self.mode
+                )
+
                 if not buy_data:
                     continue
 
@@ -82,41 +88,111 @@ class BotRunner:
                 buy_vwap = None
                 buy_cancels = 0
 
-                while time.time() - buy_start < params.max_wait_s:
-                    b = self.hub.get_order_book(sym)
-                    if b:
-                        qty, vwap = try_fill_limit(b, "buy", buy_price, amount)
-                        if qty >= amount and vwap is not None:
-                            buy_vwap = vwap
-                            break
-                    buy_price += tick
-                    buy_cancels += 1
-                    await asyncio.sleep(0.1)
+                if self.mode == "LIVE":
+                    from engine.trade_live import (
+                        place_limit,
+                        fetch_order_status,
+                        cancel_order,
+                    )
 
-                if buy_vwap is None:
-                    continue
+                    try:
+                        order = await asyncio.to_thread(
+                            place_limit, self.exchange, sym, "buy", buy_price, amount
+                        )
+                        oid = order.get("id")
+                        order = await asyncio.to_thread(
+                            fetch_order_status,
+                            self.exchange,
+                            sym,
+                            oid,
+                            params.max_wait_s,
+                        )
+                    except Exception:
+                        if "oid" in locals():
+                            try:
+                                await asyncio.to_thread(cancel_order, self.exchange, sym, oid)
+                            except Exception:
+                                pass
+                        continue
+                    filled = float(order.get("filled") or order.get("executedQty") or 0.0)
+                    buy_vwap = float(order.get("average") or order.get("price") or 0.0)
+                    if filled < amount:
+                        try:
+                            await asyncio.to_thread(cancel_order, self.exchange, sym, oid)
+                        except Exception:
+                            pass
+                        continue
+                    buy_price = float(order.get("price", buy_price))
+                else:
+                    while time.time() - buy_start < params.max_wait_s:
+                        b = self.hub.get_order_book(sym)
+                        if b:
+                            qty, vwap = try_fill_limit(b, "buy", buy_price, amount)
+                            if qty >= amount and vwap is not None:
+                                buy_vwap = vwap
+                                break
+                        buy_price += tick
+                        buy_cancels += 1
+                        await asyncio.sleep(0.1)
+
+                    if buy_vwap is None:
+                        continue
 
                 sell_order = self.strategy.build_sell_order(
-                    params, {**buy_data, "price": buy_price}
+                    params, {**buy_data, "price": buy_price}, mode=self.mode
                 )
                 sell_price = sell_order["price"]
                 sell_vwap = None
                 sell_cancels = 0
                 sell_start = time.time()
 
-                while time.time() - sell_start < params.max_wait_s:
-                    b2 = self.hub.get_order_book(sym)
-                    if b2:
-                        qty, vwap = try_fill_limit(b2, "sell", sell_price, amount)
-                        if qty >= amount and vwap is not None:
-                            sell_vwap = vwap
-                            break
-                    sell_price -= tick
-                    sell_cancels += 1
-                    await asyncio.sleep(0.1)
+                if self.mode == "LIVE":
+                    try:
+                        sorder = await asyncio.to_thread(
+                            place_limit, self.exchange, sym, "sell", sell_price, amount
+                        )
+                        soid = sorder.get("id")
+                        sorder = await asyncio.to_thread(
+                            fetch_order_status,
+                            self.exchange,
+                            sym,
+                            soid,
+                            params.max_wait_s,
+                        )
+                    except Exception:
+                        if "soid" in locals():
+                            try:
+                                await asyncio.to_thread(
+                                    cancel_order, self.exchange, sym, soid
+                                )
+                            except Exception:
+                                pass
+                        continue
+                    filled = float(sorder.get("filled") or sorder.get("executedQty") or 0.0)
+                    sell_vwap = float(sorder.get("average") or sorder.get("price") or 0.0)
+                    if filled < amount:
+                        try:
+                            await asyncio.to_thread(
+                                cancel_order, self.exchange, sym, soid
+                            )
+                        except Exception:
+                            pass
+                        continue
+                    sell_price = float(sorder.get("price", sell_price))
+                else:
+                    while time.time() - sell_start < params.max_wait_s:
+                        b2 = self.hub.get_order_book(sym)
+                        if b2:
+                            qty, vwap = try_fill_limit(b2, "sell", sell_price, amount)
+                            if qty >= amount and vwap is not None:
+                                sell_vwap = vwap
+                                break
+                        sell_price -= tick
+                        sell_cancels += 1
+                        await asyncio.sleep(0.1)
 
-                if sell_vwap is None:
-                    continue
+                    if sell_vwap is None:
+                        continue
 
                 hold_time = time.time() - buy_start
                 profit = (sell_vwap - buy_vwap) * amount
