@@ -10,6 +10,7 @@ from .prompts import (
     PROMPT_INICIAL_VARIACIONES,
     PROMPT_ANALISIS_CICLO,
     PROMPT_NUEVA_GENERACION_DESDE_GANADOR,
+    PROMPT_P0,
 )
 
 class LLMClient:
@@ -38,6 +39,7 @@ class LLMClient:
             model=self.model,
             temperature=0.2,
             messages=[
+                {"role": "system", "content": PROMPT_P0},
                 {"role": "system", "content": PROMPT_INICIAL_VARIACIONES},
                 {"role": "user", "content": trading_spec_text},
             ],
@@ -180,6 +182,7 @@ class LLMClient:
                     model=self.model,
                     temperature=0.2,
                     messages=[
+                        {"role": "system", "content": PROMPT_P0},
                         {"role": "system", "content": prompt},
                         {
                             "role": "user",
@@ -238,6 +241,7 @@ class LLMClient:
                     model=self.model,
                     temperature=0,
                     messages=[
+                        {"role": "system", "content": PROMPT_P0},
                         {"role": "system", "content": PROMPT_ANALISIS_CICLO},
                         {"role": "user", "content": json.dumps(cycle_summary)},
                     ],

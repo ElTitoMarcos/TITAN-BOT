@@ -2,6 +2,8 @@
 import time, uuid, os
 from typing import Dict, List, Any
 
+from llm.prompts import PROMPT_P0
+
 class LLMClient:
     """
     Cliente LLM:
@@ -58,7 +60,10 @@ class LLMClient:
             try:
                 resp = self._openai.chat.completions.create(
                     model=self.model,
-                    messages=[{"role": "user", "content": message}],
+                    messages=[
+                        {"role": "system", "content": PROMPT_P0},
+                        {"role": "user", "content": message},
+                    ],
                     temperature=self.temp_op,
                     timeout=20,
                 )
@@ -79,7 +84,10 @@ class LLMClient:
             try:
                 resp = self._openai.chat.completions.create(
                     model=self.model,
-                    messages=[{"role": "user", "content": message}],
+                    messages=[
+                        {"role": "system", "content": PROMPT_P0},
+                        {"role": "user", "content": message},
+                    ],
                     temperature=self.temp_ana,
                     timeout=20,
                 )
@@ -109,18 +117,22 @@ class LLMClient:
             "Responde en JSON con el campo 'actions'."
         )
 
-        content = {"role":"system","content":sys_msg}
+        content = {"role": "system", "content": sys_msg}
         user_content = {
             "role": "user",
             "content": f"Snapshot:\n{snapshot}\n\n"
                        "Devuelve JSON: {'ts':<ms>,'actions':[{'id':str,'symbol':str,'type':str,"
                        "'price':float,'qty_usd':float,'tif':str,'max_slippage_ticks':int,"
-                       "'reason':str,'confidence':float}]} (usa solo campos necesarios)."
+                       "'reason':str,'confidence':float}]} (usa solo campos necesarios).",
         }
         resp = client.chat.completions.create(
             model=self.model,
             temperature=self.temp_op,
-            messages=[content, user_content],
+            messages=[
+                {"role": "system", "content": PROMPT_P0},
+                content,
+                user_content,
+            ],
             timeout=20,
         )
         txt = resp.choices[0].message.content or "{}"

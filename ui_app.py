@@ -557,6 +557,13 @@ class App(tb.Window):
                     info = ev.payload
                     info["cycle"] = ev.cycle
                     self.testeos_frame.add_cycle_history(info)
+                elif ev.scope == "llm":
+                    if ev.message == "llm_request" and ev.payload:
+                        self.log_append(f"[LLM] request {json.dumps(ev.payload)}")
+                    elif ev.message == "llm_response" and ev.payload:
+                        self.log_append(f"[LLM] response {json.dumps(ev.payload)}")
+                    elif ev.message == "llm_error" and ev.payload:
+                        self.log_append(f"[LLM] error {ev.payload.get('error')}")
 
         except queue.Empty:
             pass

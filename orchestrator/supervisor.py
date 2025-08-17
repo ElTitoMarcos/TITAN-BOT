@@ -104,14 +104,22 @@ class Supervisor:
             asyncio.run(self.run_cycle(cycle))
             stats = self.gather_results(cycle)
             cycle_summary = self._compose_cycle_summary(cycle, stats)
+            self._emit(
+                "INFO", "llm", cycle, None, "llm_request", {"summary": cycle_summary}
+            )
             try:
                 decision = self.llm.analyze_cycle_and_pick_winner(cycle_summary)
+                self._emit("INFO", "llm", cycle, None, "llm_response", decision)
+
                 winner_id = int(decision.get("winner_bot_id", -1))
                 winner_reason = str(decision.get("reason", ""))
                 winner_cfg = self.storage.get_bot(winner_id)
                 if winner_cfg is None:
                     raise ValueError("winner cfg not found")
-            except Exception:
+            except Exception as exc:
+                self._emit(
+                    "ERROR", "llm", cycle, None, "llm_error", {"error": str(exc)}
+                )
                 winner_id, winner_cfg = self.pick_winner(cycle)
                 winner_reason = "max_pnl"
             total_pnl = sum(s.pnl for s in stats)
