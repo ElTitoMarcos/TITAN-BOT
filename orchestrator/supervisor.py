@@ -70,6 +70,7 @@ class Supervisor:
         self.hub: Optional[MarketDataHub] = None
         self.exchange_meta: Optional[ExchangeMeta] = None
         self._last_symbols: set[str] = set()
+        self._order_size_usd: float = 50.0
         self.min_orders_per_bot = int(min_orders)
 
     # ------------------------------------------------------------------
@@ -106,6 +107,21 @@ class Supervisor:
     def set_min_orders(self, num: int) -> None:
         """Configura el mínimo de órdenes requerido por bot."""
         self.min_orders_per_bot = int(num)
+
+    def set_order_size_usd(self, size: float) -> None:
+        """Actualiza el ``order_size_usd`` base para los bots.
+
+        El valor se aplica inmediatamente a los bots activos y se utilizará
+        para las generaciones futuras.
+        """
+
+        self._order_size_usd = float(size)
+        for cfg in self._current_generation:
+            muts = cfg.mutations or {}
+            if float(muts.get("order_size_usd", 0)) < self._order_size_usd:
+                muts["order_size_usd"] = self._order_size_usd
+                cfg.mutations = muts
+                self.storage.save_bot(cfg)
 
     # ------------------------------------------------------------------
     def start_mass_tests(self, num_bots: int = 10) -> None:
@@ -166,7 +182,9 @@ class Supervisor:
                 "INFO", "llm", cycle, None, "llm_request", {"summary": cycle_summary}
             )
             try:
-                decision = self.llm.analyze_cycle_and_pick_winner(cycle_summary)
+                decision = self.llm.analyze_cycle_and_pick_winner(
+                    cycle_summary, self.state.metric_weights
+                )
                 self._emit("INFO", "llm", cycle, None, "llm_response", decision)
 
                 winner_id = int(decision.get("winner_bot_id", -1))
@@ -179,8 +197,14 @@ class Supervisor:
                     "ERROR", "llm", cycle, None, "llm_error", {"error": str(exc)}
                 )
                 try:
-                    winner_id, winner_cfg = self.pick_winner(cycle)
-                    winner_reason = "max_pnl"
+                    fallback = self.llm.pick_winner_local(
+                        cycle_summary, self.state.metric_weights
+                    )
+                    winner_id = int(fallback.get("winner_bot_id", -1))
+                    winner_reason = str(fallback.get("reason", "weighted_score"))
+                    winner_cfg = self.storage.get_bot(winner_id)
+                    if winner_cfg is None:
+                        raise ValueError("winner cfg not found")
                 except ValueError as err:
                     self._emit(
                         "ERROR",
@@ -276,12 +300,19 @@ class Supervisor:
 
             self._current_generation = []
             for i in range(self._num_bots):
-                var = variations[i] if i < len(variations) else {"name": f"Bot-{self._next_bot_id + i}", "mutations": {}}
+                var = (
+                    variations[i]
+                    if i < len(variations)
+                    else {"name": f"Bot-{self._next_bot_id + i}", "mutations": {}}
+                )
+                muts = var.get("mutations", {}) or {}
+                if float(muts.get("order_size_usd", 0)) < self._order_size_usd:
+                    muts["order_size_usd"] = self._order_size_usd
                 cfg = BotConfig(
                     id=self._next_bot_id + i,
                     cycle=cycle,
                     name=str(var.get("name", f"Bot-{self._next_bot_id + i}")),
-                    mutations=var.get("mutations", {}),
+                    mutations=muts,
                     seed_parent=None,
                 )
                 self.storage.save_bot(cfg)
@@ -291,6 +322,10 @@ class Supervisor:
             # actualizar ciclo en configs existentes
             for cfg in self._current_generation:
                 cfg.cycle = cycle
+                muts = cfg.mutations or {}
+                if float(muts.get("order_size_usd", 0)) < self._order_size_usd:
+                    muts["order_size_usd"] = self._order_size_usd
+                    cfg.mutations = muts
                 self.storage.save_bot(cfg)
 
         self._emit("INFO", "cycle", cycle, None, "cycle_start", {})

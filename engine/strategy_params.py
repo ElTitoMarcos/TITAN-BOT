@@ -27,6 +27,7 @@ class Params:
     """Concrete parameters consumed by :mod:`strategy_base`."""
 
     order_size_usd: float = 50.0
+    min_notional_margin: float = 1.0
     buy_level_rule: str = "accum_bids"
     sell_k_ticks: int = 1
     max_wait_s: int = 30
@@ -56,6 +57,12 @@ def map_mutations_to_params(mutations: Dict[str, Any] | None) -> Params:
     if "order_size_usd" in mutations:
         try:
             params.order_size_usd = float(mutations["order_size_usd"])
+        except (TypeError, ValueError):
+            pass
+
+    if "min_notional_margin" in mutations:
+        try:
+            params.min_notional_margin = float(mutations["min_notional_margin"])
         except (TypeError, ValueError):
             pass
 

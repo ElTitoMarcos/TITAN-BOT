@@ -44,3 +44,49 @@ def test_new_generation_extracts_json_from_code_block():
     res = client.new_generation_from_winner({}, [])
     assert res[0]["name"] == "foo"
     assert len(res) == 10
+
+
+def test_pick_meta_winner_extracts_json():
+    content = "```json\n{\"bot_id\": 2, \"reason\": \"best pnl\"}\n```"
+    client = LLMClient(api_key="")
+    client._client = DummyClient(content)
+    winners = [
+        {"cycle": 1, "bot_id": 1, "mutations": {}, "stats": {"pnl": 1}},
+        {"cycle": 2, "bot_id": 2, "mutations": {}, "stats": {"pnl": 2}},
+    ]
+    res = client.pick_meta_winner(winners)
+    assert res["bot_id"] == 2
+
+
+def test_local_weighted_fallback_prefers_stability():
+    # Without API client, analyze_cycle_and_pick_winner debe usar fallback local
+    client = LLMClient(api_key="")
+    client._client = None
+    summary = {
+        "bots": [
+            {
+                "bot_id": 1,
+                "stats": {
+                    "pnl": 100,
+                    "win_rate": 0.5,
+                    "avg_hold_s": 10,
+                    "avg_slippage_ticks": 5,
+                    "timeouts": 10,
+                    "cancel_replace_count": 5,
+                },
+            },
+            {
+                "bot_id": 2,
+                "stats": {
+                    "pnl": 90,
+                    "win_rate": 0.5,
+                    "avg_hold_s": 10,
+                    "avg_slippage_ticks": 0,
+                    "timeouts": 0,
+                    "cancel_replace_count": 1,
+                },
+            },
+        ]
+    }
+    decision = client.analyze_cycle_and_pick_winner(summary)
+    assert decision["winner_bot_id"] == 2
