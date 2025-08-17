@@ -8,6 +8,7 @@ class SettingsFrame(ttk.Frame):
     """Controles de tamaño por operación y mínimo de Binance."""
 
     def __init__(self, master, apply_cb, toggle_min_cb, cfg) -> None:
+
         super().__init__(master, padding=0)
         self.columnconfigure(0, weight=1)
 
