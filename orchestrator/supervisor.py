@@ -17,7 +17,9 @@ from llm import LLMClient
 from .models import BotConfig, BotStats, SupervisorEvent
 from .storage import SQLiteStorage
 from state.app_state import AppState
-
+from .models import BotConfig, BotStats, SupervisorEvent
+from .storage import SQLiteStorage
+from state.app_state import AppState
 
 class Supervisor:
     """Orquesta ciclos de bots ejecutados en paralelo."""
@@ -104,6 +106,7 @@ class Supervisor:
             total_pnl = sum(s.pnl for s in stats)
             cycle_summary["winner_bot_id"] = winner_id
             cycle_summary["winner_reason"] = winner_reason
+
             self._emit(
                 "INFO",
                 "cycle",
@@ -135,6 +138,7 @@ class Supervisor:
                     "winner_reason": winner_reason,
                     "finished_at": finished_at,
                 },
+
             )
             self.spawn_next_generation_from_winner(winner_cfg)
             self.state.current_cycle = cycle

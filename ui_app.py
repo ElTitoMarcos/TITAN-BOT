@@ -542,6 +542,7 @@ class App(tb.Window):
                     info = ev.payload
                     info["cycle"] = ev.cycle
                     self.testeos_frame.add_cycle_history(info)
+
         except queue.Empty:
             pass
         self.after(200, self._poll_event_queue)
