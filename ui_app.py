@@ -82,7 +82,7 @@ class App(tb.Window):
 
     def __init__(self):
         super().__init__(title="AutoBTC - Punto a Punto", themename="cyborg")
-        self.geometry("1400x860")
+        self.geometry("1600x900")
         self.minsize(900, 600)
 
         self.colors = UIColors()
@@ -129,9 +129,9 @@ class App(tb.Window):
     def _build_ui(self):
         # Grid principal
         self.columnconfigure(0, weight=1)
-        self.columnconfigure(1, weight=1)
+        self.columnconfigure(1, weight=2)
         self.rowconfigure(1, weight=1)
-        self.rowconfigure(2, weight=1)
+        self.rowconfigure(2, weight=2)
         try:
             self._ensure_exchange()
         except Exception:
@@ -187,8 +187,8 @@ class App(tb.Window):
         # Panel inferior izquierdo para órdenes
         left = ttk.Frame(self, padding=(10,0,10,10))
         left.grid(row=2, column=0, sticky="nsew")
-        left.rowconfigure(0, weight=1)
-        left.rowconfigure(1, weight=1)
+        left.rowconfigure(0, weight=0)
+        left.rowconfigure(1, weight=0)
         left.columnconfigure(0, weight=1)
 
         # Órdenes abiertas
@@ -230,9 +230,9 @@ class App(tb.Window):
         right = ttk.Frame(self, padding=(0, 0, 10, 10))
         right.grid(row=2, column=1, sticky="nsew")
         right.columnconfigure(0, weight=1)
-        right.rowconfigure(4, weight=0)
-        right.rowconfigure(5, weight=1)
-        right.rowconfigure(6, weight=1)
+        right.rowconfigure(4, weight=1)
+        right.rowconfigure(5, weight=3)
+        right.rowconfigure(6, weight=2)
 
         ttk.Label(right, text="Ajustes").grid(row=0, column=0, sticky="w", pady=(0,6))
 
