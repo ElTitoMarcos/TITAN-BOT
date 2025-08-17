@@ -175,6 +175,46 @@ class MarketDataHub:
                 "lastUpdateId": book.get("lastUpdateId", 0),
             }
 
+    def get_trade_rate(
+        self, symbol: str, price: float, side: str, lookback_s: int = 60
+    ) -> Optional[float]:
+        """Return quantity traded per second at ``price`` or better."""
+
+        end = int(time.time() * 1000)
+        start = end - lookback_s * 1000
+        params = {"symbol": symbol.upper(), "startTime": start, "endTime": end}
+        try:
+            self._rate_limiter.acquire(1)
+            r = requests.get(
+                "https://api.binance.com/api/v3/aggTrades", params=params, timeout=10
+            )
+            trades = r.json()
+            qty = 0.0
+            for t in trades:
+                p = float(t.get("p", 0.0))
+                q = float(t.get("q", 0.0))
+                if side.lower() == "buy" and p <= price:
+                    qty += q
+                elif side.lower() == "sell" and p >= price:
+                    qty += q
+            if qty == 0:
+                self._rate_limiter.acquire(1)
+                r2 = requests.get(
+                    "https://api.binance.com/api/v3/ticker/24hr",
+                    params={"symbol": symbol.upper()},
+                    timeout=10,
+                )
+                data = r2.json()
+                vol = float(data.get("volume", 0.0))
+                trades_ct = float(data.get("count", 0.0))
+                if vol > 0 and trades_ct > 0:
+                    avg = vol / trades_ct
+                    return avg / lookback_s
+                return None
+            return qty / lookback_s
+        except Exception:
+            return None
+
     def close(self) -> None:
         self._running = False
         self._reconnect()

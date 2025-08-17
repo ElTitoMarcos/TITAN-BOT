@@ -4,6 +4,8 @@ from engine.ob_utils import (
     compute_imbalance,
     compute_spread_ticks,
     book_hash,
+    queue_ahead_qty,
+    estimate_fill_time,
 )
 
 
@@ -45,3 +47,15 @@ def test_book_hash_stable():
     h1 = book_hash(BOOK)
     h2 = book_hash({**BOOK, "extra": 1})
     assert h1 == h2
+
+
+def test_queue_ahead_qty_buy():
+    q = queue_ahead_qty(BOOK, "buy", 100.0, 1.0)
+    assert q == 1.0 + 1.0  # 1 existing bid at price plus our qty
+
+
+def test_estimate_fill_time_active_and_idle():
+    assert estimate_fill_time(BOOK, "buy", 100.0, 1.0, 0.0) is None
+    queue_qty, t_est = estimate_fill_time(BOOK, "buy", 100.0, 1.0, 2.0)
+    assert queue_qty == 2.0
+    assert math.isclose(t_est, queue_qty / 2.0)

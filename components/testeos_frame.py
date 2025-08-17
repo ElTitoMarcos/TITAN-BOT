@@ -1,5 +1,6 @@
 from typing import Callable, Dict, Any
 from ttkbootstrap.constants import *
+from ttkbootstrap.scrolled import ScrolledFrame, ScrolledText
 from tkinter import ttk
 import tkinter as tk
 
@@ -19,12 +20,13 @@ class TesteosFrame(ttk.Frame):
         self._on_toggle = on_toggle
         self._on_load_winner_for_sim = on_load_winner_for_sim
         self._running = False
+        self._cycle_reasons: Dict[str, str] = {}
         self._build()
 
     def _build(self) -> None:
         """Construye los widgets principales."""
-        self.columnconfigure(0, weight=3)
-        self.columnconfigure(1, weight=2)
+        self.columnconfigure(0, weight=1)
+        self.columnconfigure(1, weight=0)
         self.rowconfigure(0, weight=1)
 
         self.var_num_bots = tk.IntVar(value=10)
@@ -32,8 +34,8 @@ class TesteosFrame(ttk.Frame):
         self.var_depth_speed = tk.StringVar(value="100ms")
         self.var_mode = tk.StringVar(value="SIM")
 
-        # Tabla de bots fija
-        tbl_frame = ttk.Frame(self)
+        # Tabla de bots con scroll
+        tbl_frame = ScrolledFrame(self, autohide=True)
         tbl_frame.grid(row=0, column=0, sticky="nsew")
         tbl_frame.columnconfigure(0, weight=1)
         tbl_frame.rowconfigure(0, weight=1)
@@ -52,15 +54,18 @@ class TesteosFrame(ttk.Frame):
             self.tree.heading(col, text=txt)
             self.tree.column(col, width=width, anchor="center", stretch=True)
         vsb = ttk.Scrollbar(tbl_frame, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscrollcommand=vsb.set)
+        hsb = ttk.Scrollbar(tbl_frame, orient="horizontal", command=self.tree.xview)
+        self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
         self.tree.grid(row=0, column=0, sticky="nsew")
         vsb.grid(row=0, column=1, sticky="ns")
+        hsb.grid(row=1, column=0, sticky="ew")
 
         # Panel lateral con controles e historial
         side = ttk.Frame(self, padding=(8, 0, 0, 0))
-        side.grid(row=0, column=1, sticky="nsew")
+        side.grid(row=0, column=1, sticky="ns")
         side.columnconfigure(0, weight=1)
         side.rowconfigure(3, weight=1)
+        side.rowconfigure(5, weight=1)
 
         top = ttk.Frame(side)
         top.grid(row=0, column=0, sticky="w")
@@ -118,6 +123,19 @@ class TesteosFrame(ttk.Frame):
         self.tree_cycles.configure(yscrollcommand=vsb_c.set)
         self.tree_cycles.grid(row=3, column=0, sticky="nsew", pady=(8, 0))
         vsb_c.grid(row=3, column=1, sticky="ns")
+        self.tree_cycles.bind("<<TreeviewSelect>>", self._on_cycle_selected)
+
+        ttk.Label(side, text="Detalle del ganador:").grid(
+            row=4, column=0, sticky="w", pady=(8, 0)
+        )
+        self.txt_winner = ScrolledText(
+            side, height=6, autohide=True, wrap="word"
+        )
+        self.txt_winner.grid(row=5, column=0, sticky="nsew", pady=(4, 0))
+        # ScrolledText no expone directamente la opción ``state``; hay que
+        # configurarla en el widget Text subyacente.
+        self.txt_winner.text.configure(state="disabled")
+
 
     def _toggle(self) -> None:
         """Alterna el estado de los testeos y actualiza el botón."""
@@ -170,17 +188,38 @@ class TesteosFrame(ttk.Frame):
             vals[-1] = "✅"
             self.tree.item(str(bot_id), values=vals)
         self.lbl_winner.configure(text=f"Ganador: Bot {bot_id} - {clean_text(reason)}")
+        self._show_winner_reason(reason)
 
     def add_cycle_history(self, info: Dict[str, Any]) -> None:
         """Agrega una fila al historial de ciclos."""
+        reason = info.get("winner_reason", "")
         values = (
             info.get("cycle"),
             f"{info.get('total_pnl', 0.0):+.2f}",
             f"Bot {info.get('winner_id')}",
-            clean_text(info.get("winner_reason", "")),
+            clean_text(reason),
             info.get("finished_at", ""),
         )
-        self.tree_cycles.insert("", "end", values=values)
+        iid = self.tree_cycles.insert("", "end", values=values)
+        self._cycle_reasons[str(iid)] = reason
+        self._show_winner_reason(reason)
+
+    def _show_winner_reason(self, reason: str) -> None:
+        """Display the full winner reason in the text widget."""
+        txt = self.txt_winner.text
+        txt.configure(state="normal")
+        txt.delete("1.0", "end")
+        txt.insert("end", reason)
+        txt.see("end")
+        txt.configure(state="disabled")
+
+    def _on_cycle_selected(self, _event: tk.Event) -> None:
+        """Show reason for the selected cycle."""
+        sel = self.tree_cycles.selection()
+        if not sel:
+            return
+        reason = self._cycle_reasons.get(sel[0], "")
+        self._show_winner_reason(reason)
 
     def on_load_winner_for_sim(self) -> None:
         """Invoca el callback para cargar el bot ganador en modo SIM."""
