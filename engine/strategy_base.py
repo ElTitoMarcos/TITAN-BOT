@@ -140,7 +140,9 @@ class StrategyBase:
         avg_price = price
         commission = 0.0
         asset: Optional[str] = None
-        events: List[str] = []
+        fills: List[Dict[str, float]] = []
+        events: List[Dict[str, Any]] = []
+
         while True:
             try:
                 order = await asyncio.to_thread(
@@ -148,11 +150,19 @@ class StrategyBase:
                 )
             except Exception:
                 order = {}
-            fqty, favg, fee, asset = parse_fills(order)
+            fqty, favg, fee, asset, fdetail = parse_fills(order)
             if fqty > filled:
                 filled = fqty
                 avg_price = favg or avg_price
                 commission += fee
+                fills = fdetail or fills
+                if filled < qty:
+                    events.append({
+                        "type": "partial_fill",
+                        "ts": time.time(),
+                        "filled_qty": filled,
+                    })
+
             status = str(order.get("status", "")).upper()
             if status == "FILLED" and filled >= qty:
                 return {
@@ -163,6 +173,9 @@ class StrategyBase:
                     "cancel_replace_count": moves,
                     "monitor_events": events,
                     "actual_fill_time_s": time.time() - start,
+                    "order_id": order_id,
+                    "fills": fills,
+
                 }
             if time.time() - start > params.max_wait_s:
                 if (
@@ -186,7 +199,14 @@ class StrategyBase:
                         order_id = new_order.get("id", order_id)
                         price = float(new_order.get("price", new_price))
                         moves += 1
-                        events.append("replace_buy")
+                        events.append(
+                            {
+                                "type": "replace",
+                                "ts": time.time(),
+                                "new_price": price,
+                            }
+                        )
+
                         start = time.time()
                         continue
                     except Exception:
@@ -195,8 +215,20 @@ class StrategyBase:
                     await asyncio.to_thread(cancel_order, self.exchange, symbol, order_id)
                 except Exception:
                     pass
-                events.append("timeout_cancel")
-                return None
+                events.append({"type": "timeout_cancel", "ts": time.time()})
+                return {
+                    "filled_qty": filled,
+                    "avg_price": avg_price,
+                    "commission_paid": commission,
+                    "commission_asset": asset,
+                    "cancel_replace_count": moves,
+                    "monitor_events": events,
+                    "actual_fill_time_s": time.time() - start,
+                    "order_id": order_id,
+                    "fills": fills,
+                    "aborted": True,
+                }
+
             await asyncio.sleep(1)
 
     async def monitor_buy_sim(
@@ -212,7 +244,7 @@ class StrategyBase:
 
         start = time.time()
         moves = 0
-        events: List[str] = []
+        events: List[Dict[str, Any]] = []
         filled = 0.0
         avg_price = price
         commission = 0.0
@@ -232,6 +264,9 @@ class StrategyBase:
                         filled += filled_now
                         avg_price = vwap or avg_price
                         commission = 0.0
+                        if filled < qty:
+                            events.append({"type": "partial_fill", "ts": time.time(), "filled_qty": filled})
+
                     if filled >= qty:
                         return {
                             "filled_qty": filled,
@@ -241,6 +276,8 @@ class StrategyBase:
                             "cancel_replace_count": moves,
                             "monitor_events": events,
                             "actual_fill_time_s": time.time() - start,
+                            "order_id": None,
+                            "fills": [],
                         }
             if time.time() - start > params.max_wait_s:
                 if (
@@ -250,11 +287,23 @@ class StrategyBase:
                     best = best_price(book or {}, "buy") or price
                     price = best + tick
                     moves += 1
-                    events.append("replace_buy")
+                    events.append({"type": "replace", "ts": time.time(), "new_price": price})
                     start = time.time()
                     continue
-                events.append("timeout_cancel")
-                return None
+                events.append({"type": "timeout_cancel", "ts": time.time()})
+                return {
+                    "filled_qty": filled,
+                    "avg_price": avg_price,
+                    "commission_paid": commission,
+                    "commission_asset": None,
+                    "cancel_replace_count": moves,
+                    "monitor_events": events,
+                    "actual_fill_time_s": time.time() - start,
+                    "order_id": None,
+                    "fills": [],
+                    "aborted": True,
+                }
+
             await asyncio.sleep(1)
 
     async def submit_sell_live(self, symbol: str, price: float, qty: float) -> Dict[str, Any]:
@@ -289,7 +338,9 @@ class StrategyBase:
         avg_price = price
         commission = 0.0
         asset: Optional[str] = None
-        events: List[str] = []
+        fills: List[Dict[str, float]] = []
+        events: List[Dict[str, Any]] = []
+
         while True:
             try:
                 order = await asyncio.to_thread(
@@ -297,11 +348,20 @@ class StrategyBase:
                 )
             except Exception:
                 order = {}
-            fqty, favg, fee, asset = parse_fills(order)
+            fqty, favg, fee, asset, fdetail = parse_fills(order)
+
             if fqty > filled:
                 filled = fqty
                 avg_price = favg or avg_price
                 commission += fee
+                fills = fdetail or fills
+                if filled < qty:
+                    events.append({
+                        "type": "partial_fill",
+                        "ts": time.time(),
+                        "filled_qty": filled,
+                    })
+
             status = str(order.get("status", "")).upper()
             if status == "FILLED" and filled >= qty:
                 return {
@@ -312,6 +372,9 @@ class StrategyBase:
                     "cancel_replace_count": moves,
                     "monitor_events": events,
                     "actual_fill_time_s": time.time() - start,
+                    "order_id": order_id,
+                    "fills": fills,
+
                 }
             if time.time() - start > params.max_wait_s:
                 if (
@@ -335,7 +398,14 @@ class StrategyBase:
                         order_id = new_order.get("id", order_id)
                         price = float(new_order.get("price", new_price))
                         moves += 1
-                        events.append("replace_sell")
+                        events.append(
+                            {
+                                "type": "replace",
+                                "ts": time.time(),
+                                "new_price": price,
+                            }
+                        )
+
                         start = time.time()
                         continue
                     except Exception:
@@ -344,8 +414,20 @@ class StrategyBase:
                     await asyncio.to_thread(cancel_order, self.exchange, symbol, order_id)
                 except Exception:
                     pass
-                events.append("timeout_cancel")
-                return None
+                events.append({"type": "timeout_cancel", "ts": time.time()})
+                return {
+                    "filled_qty": filled,
+                    "avg_price": avg_price,
+                    "commission_paid": commission,
+                    "commission_asset": asset,
+                    "cancel_replace_count": moves,
+                    "monitor_events": events,
+                    "actual_fill_time_s": time.time() - start,
+                    "order_id": order_id,
+                    "fills": fills,
+                    "aborted": True,
+                }
+
             await asyncio.sleep(1)
 
     async def monitor_sell_sim(
@@ -362,7 +444,7 @@ class StrategyBase:
 
         start = time.time()
         moves = 0
-        events: List[str] = []
+        events: List[Dict[str, Any]] = []
         filled = 0.0
         avg_price = price
         commission = 0.0
@@ -381,6 +463,9 @@ class StrategyBase:
                     if filled_now > 0:
                         filled += filled_now
                         avg_price = vwap or avg_price
+                        if filled < qty:
+                            events.append({"type": "partial_fill", "ts": time.time(), "filled_qty": filled})
+
                     if filled >= qty:
                         return {
                             "filled_qty": filled,
@@ -390,6 +475,9 @@ class StrategyBase:
                             "cancel_replace_count": moves,
                             "monitor_events": events,
                             "actual_fill_time_s": time.time() - start,
+                            "order_id": None,
+                            "fills": [],
+
                         }
             if time.time() - start > params.max_wait_s:
                 if (
@@ -399,11 +487,23 @@ class StrategyBase:
                     best = best_price(book or {}, "sell") or price
                     price = max(best - tick, min_price)
                     moves += 1
-                    events.append("replace_sell")
+                    events.append({"type": "replace", "ts": time.time(), "new_price": price})
                     start = time.time()
                     continue
-                events.append("timeout_cancel")
-                return None
+                events.append({"type": "timeout_cancel", "ts": time.time()})
+                return {
+                    "filled_qty": filled,
+                    "avg_price": avg_price,
+                    "commission_paid": commission,
+                    "commission_asset": None,
+                    "cancel_replace_count": moves,
+                    "monitor_events": events,
+                    "actual_fill_time_s": time.time() - start,
+                    "order_id": None,
+                    "fills": [],
+                    "aborted": True,
+                }
+
             await asyncio.sleep(1)
 
     async def analyze_book(

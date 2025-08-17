@@ -12,7 +12,7 @@ blocking the event loop.
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, Tuple, Optional
+from typing import Any, Dict, Tuple, Optional, List
 
 from exchange_utils.exchange_meta import exchange_meta
 
@@ -127,19 +127,51 @@ def fetch_order_status(
     raise TimeoutError("fetch_order_status timeout")
 
 
-def parse_fills(order: Dict[str, Any]) -> Tuple[float, float, float, Optional[str]]:
-    """Extract fill quantity, average price and commission from ``order``."""
+def parse_fills(
+    order: Dict[str, Any]
+) -> Tuple[float, float, float, Optional[str], List[Dict[str, float]]]:
+    """Extract fill quantity, average price and detailed commissions.
+
+    Returns
+    -------
+    tuple
+        ``(filled_qty, avg_price, total_fee, fee_asset, fills)`` where ``fills``
+        is a list of dicts each containing ``price``, ``qty``, ``fee`` and
+        ``fee_asset`` entries parsed from the order payload.
+    """
 
     filled = float(order.get("filled") or order.get("executedQty") or 0.0)
     avg = float(order.get("average") or order.get("price") or 0.0)
     commission = 0.0
     asset: Optional[str] = None
+    fills_detail: List[Dict[str, float]] = []
     fills = order.get("trades") or order.get("fills") or []
     for f in fills:
-        commission += float(f.get("commission") or f.get("fee") or f.get("cost") or 0.0)
-        asset = f.get("commissionAsset") or f.get("asset") or f.get("currency") or asset
+        fee = float(f.get("commission") or f.get("fee") or f.get("cost") or 0.0)
+        commission += fee
+        asset = (
+            f.get("commissionAsset")
+            or f.get("asset")
+            or f.get("currency")
+            or asset
+        )
+        fills_detail.append(
+            {
+                "price": float(f.get("price") or f.get("rate") or f.get("info", {}).get("price") or 0.0),
+                "qty": float(
+                    f.get("qty")
+                    or f.get("amount")
+                    or f.get("quantity")
+                    or f.get("info", {}).get("qty")
+                    or 0.0
+                ),
+                "fee": fee,
+                "fee_asset": asset,
+            }
+        )
+
     fee = order.get("fee")
     if isinstance(fee, dict):
         commission = float(fee.get("cost") or fee.get("commission") or commission)
         asset = fee.get("currency") or fee.get("asset") or asset
-    return filled, avg, commission, asset
+    return filled, avg, commission, asset, fills_detail

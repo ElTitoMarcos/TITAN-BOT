@@ -7,7 +7,7 @@ import time
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
-from .models import BotConfig, BotStats
+from .models import BotConfig, BotStats, SupervisorEvent
 from engine.strategy_base import StrategyBase
 from engine.strategy_params import Params, map_mutations_to_params
 from engine.ob_utils import estimate_fill_time, try_fill_limit
@@ -39,6 +39,28 @@ class BotRunner:
         self.hub = hub
         self.mode = mode.upper()
 
+    def _emit(
+        self,
+        level: str,
+        message: str,
+        payload: Optional[Dict[str, Any]] = None,
+        ts: Optional[float] = None,
+    ) -> None:
+        event = SupervisorEvent(
+            ts=datetime.utcfromtimestamp(ts) if ts else datetime.utcnow(),
+            level=level,
+            scope="bot",
+            cycle=self.config.cycle,
+            bot_id=self.config.id,
+            message=message,
+            payload=payload,
+        )
+        try:
+            self.storage.append_event(event)
+        except Exception:
+            pass
+        log_event({"event": message, "bot_id": self.config.id, "cycle_id": self.config.cycle, **(payload or {})})
+
     async def run(self) -> BotStats:
         """Execute the bot respecting the provided limits."""
         params: Params = map_mutations_to_params(self.config.mutations)
@@ -47,6 +69,10 @@ class BotRunner:
         wins = 0
         losses = 0
         pnl = 0.0
+        hold_times: List[float] = []
+        slippage_total = 0
+        timeouts = 0
+        trades = 0
 
         max_orders = self.limits.get("max_orders", float("inf"))
         max_scans = self.limits.get("max_scans", 1)
@@ -82,9 +108,12 @@ class BotRunner:
                 if not buy_data:
                     continue
 
+                phase_ts = {"SELECT_PAIR": datetime.utcnow().isoformat()}
+                self._emit("INFO", "pair_selected", {"symbol": sym, "data": buy_data})
                 amount = buy_data["amount"]
                 tick = buy_data["tick_size"]
                 buy_price = buy_data["price"]
+                phase_ts["PREP_BUY"] = datetime.utcnow().isoformat()
 
                 # Estimate fill time before placing the buy order
                 book_full = self.hub.get_order_book(sym, top=100)
@@ -103,34 +132,34 @@ class BotRunner:
                     "trade_rate_qty_per_s": trade_rate,
                 }
 
-                # Log pair selection after preliminary checks pass
-                log_event(
-                    {
-                        "event": "pair_selected",
-                        "bot_id": self.config.id,
-                        "cycle_id": self.config.cycle,
-                        "symbol": sym,
-                        "data": buy_data,
-                    }
-                )
-
                 if self.mode == "LIVE":
                     try:
-                        order = await self.strategy.submit_buy_live(
-                            sym, buy_price, amount
-                        )
-                        res = await self.strategy.monitor_buy_live(
-                            params,
-                            sym,
-                            order.get("id"),
-                            buy_price,
-                            amount,
-                            tick,
-                            self.hub,
-                        )
+                        order = await self.strategy.submit_buy_live(sym, buy_price, amount)
                     except Exception:
-                        res = None
+                        self._emit("ERROR", "buy_submit_failed", {"symbol": sym})
+                        continue
+                    phase_ts["SUBMIT_BUY"] = datetime.utcnow().isoformat()
+                    self._emit(
+                        "INFO",
+                        "buy_submitted",
+                        {
+                            "symbol": sym,
+                            "price": buy_price,
+                            "qty": amount,
+                            "exchange_order_id": order.get("id"),
+                        },
+                    )
+                    res = await self.strategy.monitor_buy_live(
+                        params, sym, order.get("id"), buy_price, amount, tick, self.hub
+                    )
                 else:
+                    phase_ts["SUBMIT_BUY"] = datetime.utcnow().isoformat()
+                    self._emit(
+                        "INFO",
+                        "buy_submitted",
+                        {"symbol": sym, "price": buy_price, "qty": amount},
+                    )
+
                     if hasattr(self.strategy, "monitor_buy_sim"):
                         res = await self.strategy.monitor_buy_sim(
                             params, sym, buy_price, amount, tick, self.hub
@@ -144,41 +173,51 @@ class BotRunner:
                             "cancel_replace_count": 0,
                             "monitor_events": [],
                             "actual_fill_time_s": t_est,
+                            "order_id": None,
+                            "fills": [],
                         }
-                if not res:
+                phase_ts["MONITOR_BUY"] = datetime.utcnow().isoformat()
+                if not res or res.get("aborted") or res.get("filled_qty", 0) < amount:
+                    reason_codes = [e.get("type") for e in (res or {}).get("monitor_events", [])]
+                    if "timeout_cancel" in reason_codes:
+                        timeouts += 1
+                    phase_ts["ABORT"] = datetime.utcnow().isoformat()
+                    self._emit(
+                        "WARNING",
+                        "buy_aborted",
+                        {"symbol": sym, "reason_codes": reason_codes},
+                    )
                     continue
+                for ev in res.get("monitor_events", []):
+                    self._emit(
+                        "INFO",
+                        f"buy_{ev['type']}",
+                        {"symbol": sym, **{k: v for k, v in ev.items() if k != 'type'}},
+                        ts=ev.get("ts"),
+                    )
                 buy_vwap = res["avg_price"]
                 amount = res["filled_qty"]
+                reason_codes = [e.get("type") for e in res.get("monitor_events", [])]
                 buy_metrics.update(
+
                     {
                         "actual_fill_time_s": res.get("actual_fill_time_s"),
                         "monitor_events": res.get("monitor_events"),
                         "commission_paid": res.get("commission_paid"),
                         "commission_asset": res.get("commission_asset"),
                         "cancel_replace_count": res.get("cancel_replace_count"),
+                        "exchange_order_id": res.get("order_id"),
+                        "fills": res.get("fills"),
+                        "reason_codes": reason_codes,
                     }
                 )
-                buy_metrics["slippage_ticks"] = int(
-                    round((buy_vwap - buy_price) / tick)
-                )
-
-                buy_metrics["slippage_ticks"] = int(
-                    round((buy_vwap - buy_price) / tick)
-                ) if buy_vwap is not None else None
-                buy_metrics["monitor_events"] = []
-                buy_metrics["commission_paid"] = None
-                buy_metrics["commission_asset"] = None
-
-                log_event(
-                    {
-                        "event": "buy_order",
-                        "bot_id": self.config.id,
-                        "cycle_id": self.config.cycle,
-                        "symbol": sym,
-                        "price": buy_price,
-                        "qty": amount,
-                        "metrics": buy_metrics,
-                    }
+                buy_slip = int(round((buy_vwap - buy_price) / tick))
+                buy_metrics["slippage_ticks"] = buy_slip
+                buy_metrics["phase_timestamps"] = phase_ts
+                self._emit(
+                    "INFO",
+                    "buy_filled",
+                    {"symbol": sym, "price": buy_price, "vwap": buy_vwap, "qty": amount},
                 )
 
                 sell_order = self.strategy.build_sell_order(
@@ -204,22 +243,39 @@ class BotRunner:
                 }
                 if self.mode == "LIVE":
                     try:
-                        sorder = await self.strategy.submit_sell_live(
-                            sym, sell_price, amount
-                        )
-                        res = await self.strategy.monitor_sell_live(
-                            params,
-                            sym,
-                            sorder.get("id"),
-                            sell_price,
-                            amount,
-                            tick,
-                            self.hub,
-                            buy_vwap + tick * params.commission_buffer_ticks,
-                        )
+                        sorder = await self.strategy.submit_sell_live(sym, sell_price, amount)
                     except Exception:
-                        res = None
+                        self._emit("ERROR", "sell_submit_failed", {"symbol": sym})
+                        continue
+                    phase_ts["SUBMIT_SELL"] = datetime.utcnow().isoformat()
+                    self._emit(
+                        "INFO",
+                        "sell_submitted",
+                        {
+                            "symbol": sym,
+                            "price": sell_price,
+                            "qty": amount,
+                            "exchange_order_id": sorder.get("id"),
+                        },
+                    )
+                    res = await self.strategy.monitor_sell_live(
+                        params,
+                        sym,
+                        sorder.get("id"),
+                        sell_price,
+                        amount,
+                        tick,
+                        self.hub,
+                        buy_vwap + tick * params.commission_buffer_ticks,
+                    )
                 else:
+                    phase_ts["SUBMIT_SELL"] = datetime.utcnow().isoformat()
+                    self._emit(
+                        "INFO",
+                        "sell_submitted",
+                        {"symbol": sym, "price": sell_price, "qty": amount},
+                    )
+
                     if hasattr(self.strategy, "monitor_sell_sim"):
                         res = await self.strategy.monitor_sell_sim(
                             params,
@@ -239,40 +295,50 @@ class BotRunner:
                             "cancel_replace_count": 0,
                             "monitor_events": [],
                             "actual_fill_time_s": t_est2,
+                            "order_id": None,
+                            "fills": [],
                         }
-                if not res:
+                phase_ts["MONITOR_SELL"] = datetime.utcnow().isoformat()
+                if not res or res.get("aborted") or res.get("filled_qty", 0) < amount:
+                    reason_codes = [e.get("type") for e in (res or {}).get("monitor_events", [])]
+                    if "timeout_cancel" in reason_codes:
+                        timeouts += 1
+                    phase_ts["ABORT"] = datetime.utcnow().isoformat()
+                    self._emit(
+                        "WARNING",
+                        "sell_aborted",
+                        {"symbol": sym, "reason_codes": reason_codes},
+                    )
                     continue
+                for ev in res.get("monitor_events", []):
+                    self._emit(
+                        "INFO",
+                        f"sell_{ev['type']}",
+                        {"symbol": sym, **{k: v for k, v in ev.items() if k != 'type'}},
+                        ts=ev.get("ts"),
+                    )
                 sell_vwap = res["avg_price"]
+                reason_codes_sell = [e.get("type") for e in res.get("monitor_events", [])]
                 sell_metrics.update(
+
                     {
                         "actual_fill_time_s": res.get("actual_fill_time_s"),
                         "monitor_events": res.get("monitor_events"),
                         "commission_paid": res.get("commission_paid"),
                         "commission_asset": res.get("commission_asset"),
                         "cancel_replace_count": res.get("cancel_replace_count"),
+                        "exchange_order_id": res.get("order_id"),
+                        "fills": res.get("fills"),
+                        "reason_codes": reason_codes_sell,
+                        "phase_timestamps": phase_ts,
                     }
                 )
-                sell_metrics["slippage_ticks"] = int(
-                    round((sell_vwap - sell_price) / tick)
-                )
-
-                sell_metrics["slippage_ticks"] = int(
-                    round((sell_vwap - sell_price) / tick)
-                ) if sell_vwap is not None else None
-                sell_metrics["monitor_events"] = []
-                sell_metrics["commission_paid"] = None
-                sell_metrics["commission_asset"] = None
-
-                log_event(
-                    {
-                        "event": "sell_order",
-                        "bot_id": self.config.id,
-                        "cycle_id": self.config.cycle,
-                        "symbol": sym,
-                        "price": sell_price,
-                        "qty": amount,
-                        "metrics": sell_metrics,
-                    }
+                sell_slip = int(round((sell_vwap - sell_price) / tick))
+                sell_metrics["slippage_ticks"] = sell_slip
+                self._emit(
+                    "INFO",
+                    "sell_filled",
+                    {"symbol": sym, "price": sell_price, "vwap": sell_vwap, "qty": amount},
                 )
 
                 hold_time = (
@@ -369,15 +435,11 @@ class BotRunner:
 
                 self.storage.save_order(buy_record)
                 self.storage.save_order(sell_record)
-                log_event(
-                    {
-                        "event": "order_complete",
-                        "bot_id": self.config.id,
-                        "cycle_id": self.config.cycle,
-                        "symbol": sym,
-                        "profit": profit,
-                        "hold_time_s": hold_time,
-                    }
+                phase_ts["DONE"] = datetime.utcnow().isoformat()
+                self._emit(
+                    "INFO",
+                    "order_complete",
+                    {"symbol": sym, "profit": profit, "hold_time_s": hold_time},
                 )
                 self.ui_callback(
                     {
@@ -388,12 +450,29 @@ class BotRunner:
                     }
                 )
                 orders_count += 2
+                hold_times.append(hold_time)
+                slippage_total += abs(buy_slip) + abs(sell_slip)
+                trades += 1
 
             await asyncio.sleep(0)
 
         runtime_s = int(time.time() - start)
         notional_total = params.order_size_usd * (orders_count / 2)
         pnl_pct_total = (pnl / notional_total * 100.0) if notional_total else 0.0
+        avg_hold = sum(hold_times) / len(hold_times) if hold_times else 0.0
+        avg_slip = slippage_total / (2 * trades) if trades else 0.0
+        win_rate = wins / (wins + losses) if (wins + losses) else 0.0
+        self._emit(
+            "INFO",
+            "bot_summary",
+            {
+                "orders": orders_count,
+                "win_rate": win_rate,
+                "avg_hold_s": avg_hold,
+                "avg_slippage_ticks": avg_slip,
+                "timeouts": timeouts,
+            },
+        )
         stats = BotStats(
             bot_id=self.config.id,
             cycle=self.config.cycle,
