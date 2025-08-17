@@ -10,7 +10,7 @@ from engine.strategy_params import Params
 
 
 class DummyStrategy:
-    async def select_pairs(self, params: Params):
+    async def select_pairs(self, params: Params, hub):
         return ["ETHUSDT"]
 
     async def analyze_book(self, params: Params, symbol: str, book, mode="SIM"):
@@ -66,7 +66,30 @@ def test_operation_logging(tmp_path, monkeypatch):
         events = [json.loads(line) for line in fh]
 
     types = [e["event"] for e in events]
-    assert types == ["pair_selected", "buy_order", "sell_order", "order_complete"]
+    assert types == [
+        "pair_selected",
+        "buy_submitted",
+        "buy_filled",
+        "sell_submitted",
+        "sell_filled",
+        "order_complete",
+        "bot_summary",
+    ]
     for e in events:
-        assert e["bot_id"] == 1
-        assert e["symbol"] == "ETHUSDT"
+        if e["event"] != "bot_summary":
+            assert e["bot_id"] == 1
+            assert e.get("symbol") == "ETHUSDT"
+
+    storage = SQLiteStorage(db_path=str(db))
+    db_events = storage.get_events()
+    assert [ev.message for ev in db_events][-2:] == ["order_complete", "bot_summary"]
+
+    summary = storage.build_llm_cycle_summary(1)
+    assert summary["cycle"] == 1
+    assert summary["symbols_evaluated"] == 1
+    assert len(summary["bots"]) == 1
+    bot = summary["bots"][0]
+    assert bot["stats"]["orders"] == 2
+    assert bot["top3_pairs"][0]["symbol"] == "ETHUSDT"
+    assert bot["timeline"]
+    assert bot["raw_samples"]
