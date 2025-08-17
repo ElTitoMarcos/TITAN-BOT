@@ -12,6 +12,7 @@ from llm import LLMClient as MassLLMClient
 from components.testeos_frame import TesteosFrame
 from components.auth_frame import AuthFrame
 from components.info_frame import InfoFrame, clean_text
+from components.settings_frame import SettingsFrame
 
 from state.app_state import AppState as MassTestState
 from orchestrator.supervisor import Supervisor
@@ -230,29 +231,20 @@ class App(tb.Window):
 
         ttk.Label(right, text="Ajustes").grid(row=0, column=0, sticky="w", pady=(0,6))
 
-        # Tamaños + toggle mínimo + apply
-        frm_size = ttk.Labelframe(right, text="Tamaño por operación (USD)", padding=8)
-        frm_size.grid(row=1, column=0, sticky="ew", pady=6)
-        frm_size.columnconfigure(1, weight=1)
-        self.var_size_sim = tb.DoubleVar(value=self.cfg.size_usd_sim)
-        self.var_size_live = tb.DoubleVar(value=self.cfg.size_usd_live)
-        self.var_use_min_bin = tb.BooleanVar(value=False)
-        ttk.Label(frm_size, text="SIM").grid(row=0, column=0, sticky="w")
-        self.ent_size_sim = ttk.Entry(frm_size, textvariable=self.var_size_sim, width=14)
-        self.ent_size_sim.grid(row=0, column=1, sticky="ew")
-        ttk.Label(frm_size, text="LIVE").grid(row=1, column=0, sticky="w")
-        self.ent_size_live = ttk.Entry(frm_size, textvariable=self.var_size_live, width=14)
-        self.ent_size_live.grid(row=1, column=1, sticky="ew")
-        ttk.Button(frm_size, text="Aplicar tamaño", command=self._apply_sizes).grid(row=0, column=2, rowspan=2, padx=6)
-        self.lbl_min_marker = ttk.Label(frm_size, text="Mínimo Binance: --")
-        self.lbl_min_marker.grid(row=2, column=0, columnspan=2, sticky="w", pady=(4,0))
-        ttk.Checkbutton(
-            frm_size,
-            text="Min Binance",
-            variable=self.var_use_min_bin,
-            style="info.Switch",
-            command=self._toggle_min_binance,
-        ).grid(row=2, column=2, padx=6, pady=(4,0))
+        # Tamaños + toggle mínimo + apply (SettingsFrame)
+        self.settings_frame = SettingsFrame(
+            right,
+            self._apply_sizes,
+            self._toggle_min_binance,
+            self.cfg,
+        )
+        self.settings_frame.grid(row=1, column=0, sticky="ew", pady=6)
+        self.var_size_sim = self.settings_frame.var_size_sim
+        self.var_size_live = self.settings_frame.var_size_live
+        self.var_use_min_bin = self.settings_frame.var_use_min_bin
+        self.ent_size_sim = self.settings_frame.ent_size_sim
+        self.ent_size_live = self.settings_frame.ent_size_live
+        self.lbl_min_marker = self.settings_frame.lbl_min_marker
 
         # API keys and verification badges
         self.auth_frame = AuthFrame(right, self._start_confirm_apis)
@@ -478,14 +470,38 @@ class App(tb.Window):
     def _apply_sizes(self):
 
         """Aplica los tamaños por operación para SIM y LIVE."""
+        margin = 1.0
+        min_usd = 0.0
         try:
-            if self._engine_sim:
-                self._engine_sim.cfg.size_usd_sim = float(self.var_size_sim.get())
+            self._ensure_exchange()
+            min_usd = self.exchange.global_min_notional_usd()
         except Exception:
             pass
+        # SIM size
         try:
+            size_sim = float(self.var_size_sim.get())
+            eff_sim = max(size_sim, min_usd + margin)
+            if eff_sim != size_sim:
+                self.var_size_sim.set(eff_sim)
+                self.log_append(
+                    f"[ENGINE] Tamaño SIM ajustado a {eff_sim:.2f} USD (mínimo {min_usd:.2f})"
+                )
+            if self._engine_sim:
+                self._engine_sim.cfg.size_usd_sim = eff_sim
+        except Exception:
+            pass
+        # LIVE size
+        try:
+            size_live = float(self.var_size_live.get())
+            eff_live = max(size_live, min_usd + margin)
+            if eff_live != size_live:
+                self.var_size_live.set(eff_live)
+                self.log_append(
+                    f"[ENGINE] Tamaño LIVE ajustado a {eff_live:.2f} USD (mínimo {min_usd:.2f})"
+                )
             if self._engine_live:
-                self._engine_live.cfg.size_usd_live = float(self.var_size_live.get())
+                self._engine_live.cfg.size_usd_live = eff_live
+            self._supervisor.set_order_size_usd(eff_live)
         except Exception:
             pass
 
@@ -495,7 +511,8 @@ class App(tb.Window):
         if use_min:
             try:
                 self._ensure_exchange()
-                min_usd = self.exchange.global_min_notional_usd()
+                margin = 1.0
+                min_usd = self.exchange.global_min_notional_usd() + margin
                 self.var_size_live.set(min_usd)
                 self.ent_size_live.configure(state="disabled")
                 self.lbl_min_marker.configure(text=f"Mínimo Binance: {min_usd:.2f} USDT")
@@ -505,6 +522,7 @@ class App(tb.Window):
                 self.lbl_min_marker.configure(text="Mínimo Binance: --")
         else:
             self.ent_size_live.configure(state="normal")
+        self._apply_sizes()
 
     def _apply_min_orders(self):
         """Aplica el mínimo de órdenes requerido para la sesión de test."""
