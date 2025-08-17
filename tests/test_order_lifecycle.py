@@ -7,7 +7,6 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from trading.order_lifecycle import OrderLifecycle
 from trading.modes import PartialFillEvent
 
-
 class DummyExchange:
     def __init__(self):
         self.orders = {}
@@ -52,7 +51,6 @@ def test_sim_open_and_fill(monkeypatch):
     assert filled == ["FILLED"]
     assert events[0]["event"] == "order_opened"
     assert events[1]["event"] == "order_filled"
-
 
 class MockFiller:
     def __init__(self):

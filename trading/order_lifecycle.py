@@ -7,7 +7,6 @@ from data_logger import log_event
 from exchange_utils.exchange_meta import exchange_meta
 from .modes import get_mode_filler, BaseModeFiller
 
-
 class OrderLifecycle:
     """Manage the lifecycle of a single limit order.
 
