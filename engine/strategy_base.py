@@ -34,6 +34,28 @@ class OrderOutcome:
     expected_fill_time_s: float | None = None
     actual_fill_time_s: float | None = None
 
+
+class OrderLifecycle(Enum):
+    """Lifecycle states for a trade."""
+
+    SELECT_PAIR = auto()
+    PREP_BUY = auto()
+    SUBMIT_BUY = auto()
+    MONITOR_BUY = auto()
+    SUBMIT_SELL = auto()
+    MONITOR_SELL = auto()
+    DONE = auto()
+    ABORT = auto()
+
+
+@dataclass
+class OrderOutcome:
+    pnl: float = 0.0
+    pnl_pct: float = 0.0
+    slippage_ticks: int | None = None
+    expected_fill_time_s: float | None = None
+    actual_fill_time_s: float | None = None
+
 class StrategyBase:
     """Execute the base BTC strategy under mutable parameters."""
 
