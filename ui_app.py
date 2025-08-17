@@ -692,12 +692,23 @@ class App(tb.Window):
         self.log_append(f"[ORDER {mode}] {side} {sym} {qty} @ {price}")
 
     def log_append(self, msg: str):
+        """Append log messages to the UI log with timestamp and level."""
+        level = "INFO"
+        for prefix in ("[ERROR]", "[WARN]", "[INFO]"):
+            if msg.startswith(prefix):
+                level = prefix[1:-1]
+                msg = msg[len(prefix):].strip()
+                break
+
         if msg.startswith("[LLM]"):
             self.info_frame.append_llm_log("info", msg[5:].strip())
-        else:
-            if not hasattr(self, "_log_queue"):
-                self._log_queue = queue.Queue()
-            self._log_queue.put(clean_text(msg))
+
+        if not hasattr(self, "_log_queue"):
+            self._log_queue = queue.Queue()
+
+        ts = time.strftime("%H:%M:%S")
+        formatted = f"{ts} [{level}] {clean_text(msg)}"
+        self._log_queue.put(formatted)
 
     def _poll_log_queue(self):
         try:

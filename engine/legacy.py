@@ -49,6 +49,7 @@ class Engine(threading.Thread):
 
     def stop(self):
         """Señala al hilo que debe detenerse."""
+        self.ui_log(f"[WARN] [ENGINE {self.name}] Stop solicitado")
         self._stop_event.set()
 
     def is_stopped(self) -> bool:
@@ -191,7 +192,7 @@ class Engine(threading.Thread):
                 "FILL", sym, f"BUY {qty_usd:.2f} USD @ {fill_price} ({order.get('mode')})"
             )
             self.ui_log(
-                f"[ENGINE {self.name}] FILL BUY {sym} {qty_usd:.2f} @ {fill_price}"
+                f"[INFO] [ENGINE {self.name}] FILL BUY {sym} {qty_usd:.2f} @ {fill_price}"
             )
         else:
             pos["qty"] = pos["qty"] - qty_base
@@ -215,7 +216,7 @@ class Engine(threading.Thread):
                 "FILL", sym, f"SELL {qty_usd:.2f} USD @ {fill_price} ({order.get('mode')})"
             )
             self.ui_log(
-                f"[ENGINE {self.name}] FILL SELL {sym} {qty_usd:.2f} @ {fill_price}"
+                f"[INFO] [ENGINE {self.name}] FILL SELL {sym} {qty_usd:.2f} @ {fill_price} PNL {pnl:.2f}"
             )
             try:
                 self.order_hook(trade)
@@ -549,6 +550,7 @@ def _log_audit(self, event: str, sym: str, detail: str):
         return True
 
     def run(self):
+        self.ui_log(f"[INFO] [ENGINE {self.name}] Hilo iniciado")
         try:
             greet_msg = self.llm.greet("hola")
             if greet_msg:
@@ -653,6 +655,7 @@ def _log_audit(self, event: str, sym: str, detail: str):
 
             time.sleep(0.25)
 
+        self.ui_log(f"[INFO] [ENGINE {self.name}] Hilo detenido")
 
     def _ensure_logs_dir(self):
         import os
