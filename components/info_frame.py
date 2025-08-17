@@ -63,7 +63,7 @@ class InfoFrame(ttk.Labelframe):
             text="Pausar log",
             command=self.toggle_pause,
             width=12,
-            bootstyle=SECONDARY,
+            bootstyle=INFO,
         )
         self.btn_pause.grid(row=2, column=1, sticky="ew", padx=2, pady=2)
         ttk.Button(
@@ -71,7 +71,7 @@ class InfoFrame(ttk.Labelframe):
             text="Aplicar mín. órdenes",
             command=on_apply_min_orders,
             width=12,
-            bootstyle=WARNING,
+            bootstyle=INFO,
         ).grid(row=2, column=2, sticky="ew", padx=2, pady=2)
 
         ttk.Button(
@@ -86,14 +86,14 @@ class InfoFrame(ttk.Labelframe):
             text="Aplicar a LIVE",
             command=on_apply_winner_live,
             width=12,
-            bootstyle=WARNING,
+            bootstyle=INFO,
         ).grid(row=3, column=1, sticky="ew", padx=2, pady=2)
         ttk.Button(
             self,
             text="Crear PR patch",
             command=on_submit_patch,
             width=12,
-            bootstyle=SECONDARY,
+            bootstyle=INFO,
         ).grid(row=3, column=2, sticky="ew", padx=2, pady=2)
 
         self._last_prompt: Optional[str] = None
