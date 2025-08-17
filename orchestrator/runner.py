@@ -50,6 +50,7 @@ class BotRunner:
                 break
             buy = await self.strategy.place_buy(params, sym)
             expected_ticks = params.sell_k_ticks
+
             self.storage.save_order(
                 {
                     "order_id": buy.get("id"),
@@ -109,6 +110,7 @@ class BotRunner:
                     "raw_json": json.dumps(sell),
                 }
             )
+
             open_orders.append((buy, sell))
             orders_count += 2
 
@@ -124,6 +126,7 @@ class BotRunner:
             tick = buy.get("tick_size") or 1
             expected_ticks = params.sell_k_ticks
             actual_ticks = int(round((sell["price"] - buy["price"]) / tick))
+            
             for side, order in (("buy", buy), ("sell", sell)):
                 data = {
                     "order_id": order.get("id"),
@@ -150,6 +153,7 @@ class BotRunner:
                     "cancel_replace_count": upd.get("cancel_replace_count"),
                     "time_in_force": order.get("time_in_force"),
                     "hold_time_s": upd.get("hold_time_s"),
+
                     "raw_json": json.dumps(order),
                 }
                 self.storage.save_order(data)

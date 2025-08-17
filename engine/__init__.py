@@ -15,6 +15,7 @@ def create_engine(
     on_order: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> Engine:
     """Instantiate :class:`Engine` applying overrides and hooks."""
+
     engine = Engine(ui_push_snapshot=lambda _: None, exchange=exchange)
     if config_overrides:
         for key, value in config_overrides.items():
@@ -23,7 +24,6 @@ def create_engine(
     if on_order:
         engine.set_order_hook(on_order)
     return engine
-
 
 def load_sim_config(mutations: Dict[str, Any]) -> Engine:
     """Create a SIM engine applying strategy mutations."""
