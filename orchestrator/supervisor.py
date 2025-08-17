@@ -236,14 +236,17 @@ class Supervisor:
         """Ejecuta un ciclo completo simulando bots."""
         # Persist start of cycle
         self.storage.save_cycle_summary(cycle, {"started_at": datetime.utcnow().isoformat()})
-        if self.hub:
-            self.hub._sub_mgr.max_depth = self.state.max_depth_symbols
-            symbols = self._prepare_candidate_symbols()
-            for sym in symbols:
-                self.hub.subscribe_depth(sym, self.state.depth_speed)
-            for sym in self._last_symbols - set(symbols):
-                self.hub.unsubscribe_depth(sym)
-            self._last_symbols = set(symbols)
+        if self.hub is None:
+            self._emit("ERROR", "cycle", cycle, None, "hub_not_initialized", {})
+            return
+        self.hub._sub_mgr.max_depth = self.state.max_depth_symbols
+        symbols = self._prepare_candidate_symbols()
+        for sym in symbols:
+            self.hub.subscribe_depth(sym, self.state.depth_speed)
+        for sym in self._last_symbols - set(symbols):
+            self.hub.unsubscribe_depth(sym)
+        self._last_symbols = set(symbols)
+
         # Generar bots si es la primera vez
         if not self._current_generation:
             variations: List[Dict[str, object]] = []

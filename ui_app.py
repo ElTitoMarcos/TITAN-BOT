@@ -545,7 +545,7 @@ class App(tb.Window):
                 self.log_append("[TEST] APIs no verificadas")
                 self.testeos_frame.btn_toggle.configure(text="Iniciar Testeos", bootstyle=SUCCESS)
                 return
-              
+
             st = self._supervisor.state
             st.max_depth_symbols = int(params.get("max_depth_symbols", st.max_depth_symbols))
             st.depth_speed = params.get("depth_speed", st.depth_speed)

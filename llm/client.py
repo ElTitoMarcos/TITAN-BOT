@@ -47,6 +47,8 @@ class LLMClient:
         handle unavailable credentials without raising exceptions.
         """
         if not self.api_key:
+            self._client = None
+            
             return False
         try:
             import requests
@@ -56,8 +58,13 @@ class LLMClient:
                 headers={"Authorization": f"Bearer {self.api_key}"},
                 timeout=5,
             )
-            return resp.status_code == 200
+            if resp.status_code == 200:
+                return True
+            self._client = None
+            return False
         except Exception:
+            self._client = None
+
             return False
 
     # ------------------------------------------------------------------
@@ -128,7 +135,7 @@ class LLMClient:
     def generate_initial_variations(self, trading_spec_text: str) -> List[Dict[str, object]]:
         """Obtiene 10 variaciones únicas de la estrategia base."""
         raw: List[Dict[str, object]] = []
-        if self._client is not None:
+        if self._client is not None and self.check_credentials():
             try:
                 raw = self._call_openai(trading_spec_text)
             except Exception:
