@@ -107,13 +107,18 @@ class LLMClient:
             )
             txt = resp.choices[0].message.content or "[]"
             self._log("response", txt)
-            data = json.loads(txt)
-            if not isinstance(data, list):
-                raise ValueError("respuesta no es lista")
-            return data
+            try:
+                data = json.loads(txt)
+                if not isinstance(data, list):
+                    self._log("response", {"error": "respuesta no es lista", "raw": txt})
+                    return []
+                return data
+            except Exception as e:
+                self._log("response", {"error": str(e), "raw": txt})
+                return []
         except Exception as e:
             self._log("response", {"error": str(e)})
-            raise
+            return []
 
     # ------------------------------------------------------------------
     def _fallback_variations(self) -> List[Dict[str, object]]:
