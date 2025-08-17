@@ -128,6 +128,7 @@ class LLMClient:
                 self._log("response", {"error": "respuesta no es lista", "raw": txt})
                 return []
             return data
+
         except Exception as e:
             self._log("response", {"error": str(e)})
             return []
