@@ -16,7 +16,23 @@ from llm import LLMClient
 from .models import BotConfig, BotStats, SupervisorEvent
 from .storage import SQLiteStorage
 from state.app_state import AppState
-from exchange_utils.orderbook_service import market_data_hub
+import exchange_utils.orderbook_service as ob_service
+import exchange_utils.exchange_meta as exchange_meta_mod
+from exchange_utils.orderbook_service import MarketDataHub
+from exchange_utils.exchange_meta import ExchangeMeta
+
+POPULAR_SYMBOLS = [
+    "BTCUSDT",
+    "ETHUSDT",
+    "BNBUSDT",
+    "XRPUSDT",
+    "SOLUSDT",
+    "ADAUSDT",
+    "DOGEUSDT",
+    "MATICUSDT",
+    "LTCUSDT",
+    "TRXUSDT",
+]
 
 class Supervisor:
     """Orquesta ciclos de bots ejecutados en paralelo."""
@@ -47,9 +63,12 @@ class Supervisor:
         self._callbacks: List[Callable[[SupervisorEvent], None]] = []
         self.mass_tests_enabled = False
         self._thread: Optional[threading.Thread] = None
-        self._num_bots = 10
+        self._num_bots = self.state.bots_per_cycle
         self._next_bot_id = self.state.next_bot_id
         self._current_generation: List[BotConfig] = []
+        self.hub: Optional[MarketDataHub] = None
+        self.exchange_meta: Optional[ExchangeMeta] = None
+        self._last_symbols: set[str] = set()
 
     # ------------------------------------------------------------------
     # Streaming de eventos
@@ -87,7 +106,24 @@ class Supervisor:
         """Inicia el ciclo continuo de testeos en un hilo aparte."""
         if self.mass_tests_enabled:
             return
+        if not (
+            self.state.apis_verified.get("binance")
+            and self.state.apis_verified.get("llm")
+        ):
+            self._emit("ERROR", "auth", None, None, "apis_not_verified", {})
+            return
         self._num_bots = num_bots
+        if not self.hub:
+            try:
+                ob_service.market_data_hub.close()
+            except Exception:
+                pass
+            self.hub = ob_service.MarketDataHub(self.state.max_depth_symbols)
+            ob_service.market_data_hub = self.hub
+            self.exchange_meta = exchange_meta_mod.ExchangeMeta()
+            exchange_meta_mod.exchange_meta = self.exchange_meta
+        else:
+            self.hub._sub_mgr.max_depth = self.state.max_depth_symbols
         self.mass_tests_enabled = True
         # Generación inicial vacía -> se creará en el primer ciclo
         self._current_generation = []
@@ -97,6 +133,12 @@ class Supervisor:
     def stop_mass_tests(self) -> None:
         """Detiene los ciclos de testeos."""
         self.mass_tests_enabled = False
+        if self.hub:
+            try:
+                self.hub.close()
+            except Exception:
+                pass
+            self.hub = None
 
     # ------------------------------------------------------------------
     def _loop(self) -> None:
@@ -194,6 +236,14 @@ class Supervisor:
         """Ejecuta un ciclo completo simulando bots."""
         # Persist start of cycle
         self.storage.save_cycle_summary(cycle, {"started_at": datetime.utcnow().isoformat()})
+        if self.hub:
+            self.hub._sub_mgr.max_depth = self.state.max_depth_symbols
+            symbols = self._prepare_candidate_symbols()
+            for sym in symbols:
+                self.hub.subscribe_depth(sym, self.state.depth_speed)
+            for sym in self._last_symbols - set(symbols):
+                self.hub.unsubscribe_depth(sym)
+            self._last_symbols = set(symbols)
         # Generar bots si es la primera vez
         if not self._current_generation:
             variations: List[Dict[str, object]] = []
@@ -325,6 +375,10 @@ class Supervisor:
                 }
             )
         return summary
+
+    def _prepare_candidate_symbols(self) -> List[str]:
+        k = min(self._num_bots, len(POPULAR_SYMBOLS))
+        return random.sample(POPULAR_SYMBOLS, k)
 
     def pick_winner(self, cycle: int) -> Tuple[int, BotConfig]:
         """Selecciona el bot con mayor PNL."""

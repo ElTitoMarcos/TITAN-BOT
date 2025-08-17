@@ -39,6 +39,28 @@ class LLMClient:
                 self._client = None
 
     # ------------------------------------------------------------------
+    def check_credentials(self) -> bool:
+        """Verifies that the configured API key is valid.
+
+        It performs a minimal request to the OpenAI API. Any network or
+        authentication error results in ``False`` so callers can decide how to
+        handle unavailable credentials without raising exceptions.
+        """
+        if not self.api_key:
+            return False
+        try:
+            import requests
+
+            resp = requests.get(
+                "https://api.openai.com/v1/models",
+                headers={"Authorization": f"Bearer {self.api_key}"},
+                timeout=5,
+            )
+            return resp.status_code == 200
+        except Exception:
+            return False
+
+    # ------------------------------------------------------------------
     def _log(self, tag: str, payload: Any) -> None:
         if self.on_log:
             try:
