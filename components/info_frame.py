@@ -42,7 +42,7 @@ class InfoFrame(ttk.Labelframe):
         self._log_queue: "queue.Queue[Callable[[], None]]" = queue.Queue()
         self.paused = False
 
-        self.txt_logs = ScrolledText(self, height=6, autohide=True, wrap="word")
+        self.txt_logs = ScrolledText(self, height=3, autohide=True, wrap="word")
         self.txt_logs.grid(row=0, column=0, columnspan=2, sticky="nsew")
 
         ttk.Button(
@@ -74,6 +74,8 @@ class InfoFrame(ttk.Labelframe):
             self, text="Crear PR patch", command=on_submit_patch, bootstyle=INFO
         ).grid(row=5, column=0, columnspan=2, sticky="ew", pady=(4, 0))
 
+        self._last_prompt: Optional[str] = None
+
         self.after(200, self._process_log_queue)
 
     # ------------------------------------------------------------------
@@ -83,22 +85,24 @@ class InfoFrame(ttk.Labelframe):
         """Encola eventos del LLM para mostrarlos."""
         text = sanitize_log(clean_text(payload))
         if tag == "request":
-            self._log_queue.put(
-                lambda: self.render_llm_request(text, label)
+            prompt_text = (
+                sanitize_log(clean_text(label)) if label is not None else text
             )
+            self._last_prompt = prompt_text[:80]
         elif tag == "response":
-            self._log_queue.put(lambda: self.render_llm_response(text))
+            response_text = text[:120]
+            prompt = self._last_prompt or ""
+            self._log_queue.put(
+                lambda: self.render_prompt_response(prompt, response_text)
+            )
+            self._last_prompt = None
         else:
             self._log_queue.put(
                 lambda: self._insert_text(f"[LLM {tag}] {text}")
             )
 
-    def render_llm_request(self, text: str, label: Optional[str]) -> None:
-        msg = f'Envío LLM: Prompt "{label}"' if label else f"Envío LLM: {text}"
-        self._insert_text(msg)
-
-    def render_llm_response(self, text: str) -> None:
-        self._insert_text(f"Respuesta LLM: {text}")
+    def render_prompt_response(self, prompt: str, response: str) -> None:
+        self._insert_text(f"Prompt: {prompt} | Resp: {response}")
 
     def _insert_text(self, line: str) -> None:
         self.txt_logs.insert("end", line + "\n")
