@@ -12,6 +12,7 @@ from llm import LLMClient as MassLLMClient
 from components.testeos_frame import TesteosFrame
 from components.auth_frame import AuthFrame
 from components.info_frame import InfoFrame, clean_text
+
 from state.app_state import AppState as MassTestState
 from orchestrator.supervisor import Supervisor
 import exchange_utils.binance_check as binance_check
@@ -94,7 +95,6 @@ class App(tb.Window):
         self.mass_state.save()
 
         self._snapshot: Dict[str, Any] = {}
-        self._log_queue: "queue.Queue[str]" = queue.Queue()
         self._event_queue: "queue.Queue" = queue.Queue()
         self._engine_sim: Engine | None = None
         self._engine_live: Engine | None = None
@@ -113,11 +113,11 @@ class App(tb.Window):
             llm_client=llm_client,
             min_orders=int(self.var_min_orders.get()),
         )
+
         self._supervisor.stream_events(lambda ev: self._event_queue.put(ev))
         self._load_saved_keys()
         self.auth_frame.update_badges(self.mass_state.apis_verified)
         self._apply_api_locks()
-        self.after(250, self._poll_log_queue)
         self.after(250, self._poll_event_queue)
         self.after(4000, self._tick_ui_refresh)
         self.after(3000, self._tick_open_orders)

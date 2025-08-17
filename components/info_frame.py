@@ -6,7 +6,6 @@ from ttkbootstrap.constants import *
 from ttkbootstrap.scrolled import ScrolledText
 from tkinter import ttk
 
-
 def clean_text(payload: Any) -> str:
     """Return a plain text representation without brackets or quotes."""
     if isinstance(payload, dict):
@@ -16,7 +15,6 @@ def clean_text(payload: Any) -> str:
     else:
         text = str(payload)
     return text.translate(str.maketrans("", "", "{}[]\"'"))
-
 
 class InfoFrame(ttk.Labelframe):
     """Frame que muestra información y logs del LLM."""
@@ -69,6 +67,7 @@ class InfoFrame(ttk.Labelframe):
     def append_llm_log(self, tag: str, payload: Any) -> None:
         """Encola eventos del LLM para mostrarlos."""
         text = clean_text(payload)
+
         self._log_queue.put(f"[LLM {tag}] {text}")
 
     def _process_log_queue(self) -> None:
