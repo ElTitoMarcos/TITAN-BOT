@@ -36,3 +36,11 @@ def test_analyze_cycle_extracts_json_from_code_block():
     cycle = {"bots": [{"bot_id": 1, "stats": {"pnl": 0}}]}
     res = client.analyze_cycle_and_pick_winner(cycle)
     assert res["winner_bot_id"] == 7
+
+def test_new_generation_extracts_json_from_code_block():
+    content = "noise```json\n[{\"name\":\"foo\",\"mutations\":{}}]\n```more"
+    client = LLMClient(api_key="")
+    client._client = DummyClient(content)
+    res = client.new_generation_from_winner({}, [])
+    assert res[0]["name"] == "foo"
+    assert len(res) == 10

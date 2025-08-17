@@ -292,8 +292,11 @@ class LLMClient:
                 )
                 txt = resp.choices[0].message.content or "[]"
                 self._log("response", txt)
-                raw = json.loads(txt)
-                if not isinstance(raw, list):
+                data = self._extract_json(txt)
+                if isinstance(data, list):
+                    raw = data
+                else:
+                    self._log("response", {"error": "no json array", "raw": txt})
                     raw = []
             except Exception as e:
                 self._log("response", {"error": str(e)})
