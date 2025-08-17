@@ -4,6 +4,7 @@ from engine import Engine
 
 class TestManager(threading.Thread):
     """Runs iterative testing cycles for strategy variations."""
+    __test__ = False  # Prevent pytest from collecting this class
     def __init__(
         self,
         cfg,

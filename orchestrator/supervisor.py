@@ -8,7 +8,7 @@ import hashlib
 import random
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -96,7 +96,7 @@ class Supervisor:
         payload: Optional[Dict[str, object]] = None,
     ) -> None:
         event = SupervisorEvent(
-            ts=datetime.utcnow(),
+            ts=datetime.now(timezone.utc),
             level=level,
             scope=scope,
             cycle=cycle,
@@ -222,7 +222,7 @@ class Supervisor:
         self._emit("INFO", "llm", None, None, "global_insights", insights)
 
         # Persist report to disk
-        ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         reports_dir = Path("reports")
         reports_dir.mkdir(exist_ok=True)
         with open(reports_dir / f"global_insights_{ts}.json", "w", encoding="utf-8") as fh:
@@ -300,7 +300,7 @@ class Supervisor:
                 {"winner_id": winner_id, "reason": winner_reason},
             )
             self._emit("INFO", "bot", cycle, winner_id, "bot_winner", {"reason": winner_reason})
-            finished_at = datetime.utcnow().isoformat()
+            finished_at = datetime.now(timezone.utc).isoformat()
             self.storage.save_cycle_summary(
                 cycle,
                 {
@@ -341,7 +341,7 @@ class Supervisor:
     async def run_cycle(self, cycle: int) -> None:
         """Ejecuta un ciclo completo simulando bots."""
         # Persist start of cycle
-        self.storage.save_cycle_summary(cycle, {"started_at": datetime.utcnow().isoformat()})
+        self.storage.save_cycle_summary(cycle, {"started_at": datetime.now(timezone.utc).isoformat()})
         if self.hub is None:
             self._emit("ERROR", "cycle", cycle, None, "hub_not_initialized", {})
             return
