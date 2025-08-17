@@ -69,3 +69,19 @@ inconsistentes.
 Devuelve JSON: { "bot_id": <int>, "reason": "<breve explicación>" }.
 El JSON debe ser parseable. Nada más.
 """
+
+PROMPT_ANALISIS_GLOBAL = """
+Te paso un resumen global con métricas por mutación, tendencias,
+mejores pares y estabilidad general. Propón 3-5 cambios accionables
+para mejorar el sistema de testeos y trading. Devuelve JSON:
+{
+  "changes": ["<breve cambio 1>", "<breve cambio 2>", ...]
+}
+El JSON debe ser parseable. Nada más.
+"""
+
+PROMPT_PATCH_FROM_CHANGES = """
+Te paso una lista de cambios accionables en formato JSON. Genera un patch
+unificado (diff) que implemente de manera aproximada esas sugerencias.
+Devuelve solo el diff en texto plano sin explicación adicional.
+"""

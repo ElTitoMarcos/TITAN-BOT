@@ -288,6 +288,7 @@ class App(tb.Window):
             self._apply_min_orders,
             self._revert_patch,
             self._apply_winner_live,
+            self._submit_patch,
         )
         self.info_frame.grid(row=5, column=0, sticky="nsew", pady=(6, 0))
 
@@ -462,6 +463,10 @@ class App(tb.Window):
                     eng.revert_last_patch()
             except Exception:
                 pass
+
+    def _submit_patch(self):
+        """Placeholder to submit the last LLM patch as a PR."""
+        self.log_append("[LLM] Solicitud de PR enviada (dummy)")
 
     def _apply_winner_live(self):
         self.log_append("[TEST] Aplicar ganador a LIVE presionado")
@@ -665,6 +670,12 @@ class App(tb.Window):
                     info = ev.payload
                     info["cycle"] = ev.cycle
                     self.testeos_frame.add_cycle_history(info)
+                elif ev.message == "global_insights" and ev.payload:
+                    self.info_frame.append_llm_log("global_insights", ev.payload)
+                elif ev.message == "global_patch" and ev.payload:
+                    self.info_frame.append_llm_log(
+                        "global_patch", ev.payload.get("diff", "")
+                    )
 
         except queue.Empty:
             pass

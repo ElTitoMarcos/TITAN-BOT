@@ -74,6 +74,9 @@ class Supervisor:
         self._order_size_mode: str = str(self.state.order_size_mode)
         self._active_runners: List[Any] = []
         self.min_orders_per_bot = int(min_orders)
+        self._global_thread: Optional[threading.Thread] = None
+        self._global_stop: Optional[threading.Event] = None
+        self._global_interval_s: int = 6 * 3600
 
     # ------------------------------------------------------------------
     # Streaming de eventos
@@ -163,6 +166,10 @@ class Supervisor:
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
 
+        # arranca también el scheduler de análisis global si no está activo
+        if not self._global_thread:
+            self.start_global_scheduler(self._global_interval_s)
+
     def stop_mass_tests(self) -> None:
         """Detiene los ciclos de testeos."""
         self.mass_tests_enabled = False
@@ -172,6 +179,55 @@ class Supervisor:
             except Exception:
                 pass
             self.hub = None
+
+    # ------------------------------------------------------------------
+    # Global analysis scheduler
+    def start_global_scheduler(self, interval_s: int) -> None:
+        """Inicia el scheduler periódico de análisis global."""
+        self._global_interval_s = int(interval_s)
+        if self._global_thread and self._global_thread.is_alive():
+            return
+        self._global_stop = threading.Event()
+        self._global_thread = threading.Thread(
+            target=self._global_loop, daemon=True
+        )
+        self._global_thread.start()
+
+    def stop_global_scheduler(self) -> None:
+        """Detiene el scheduler de análisis global."""
+        if self._global_stop:
+            self._global_stop.set()
+        if self._global_thread:
+            self._global_thread.join(timeout=1)
+            self._global_thread = None
+
+    def _global_loop(self) -> None:
+        while self._global_stop and not self._global_stop.is_set():
+            time.sleep(self._global_interval_s)
+            if self._global_stop and self._global_stop.is_set():
+                break
+            try:
+                self.run_global_analysis()
+            except Exception as e:
+                self._emit("ERROR", "llm", None, None, "global_analysis_fail", {"error": str(e)})
+
+    def run_global_analysis(self) -> None:
+        summary = self.storage.gather_global_summary()
+        self._emit("INFO", "llm", None, None, "global_summary", summary)
+        insights = self.llm.analyze_global(summary)
+        self._emit("INFO", "llm", None, None, "global_insights", insights)
+
+        # Persist report to disk
+        ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        reports_dir = Path("reports")
+        reports_dir.mkdir(exist_ok=True)
+        with open(reports_dir / f"global_insights_{ts}.json", "w", encoding="utf-8") as fh:
+            json.dump({"summary": summary, "insights": insights}, fh, ensure_ascii=False, indent=2)
+
+        # Generate optional patch in dry-run mode
+        diff = self.llm.propose_patch(insights)
+        if diff:
+            self._emit("INFO", "llm", None, None, "global_patch", {"diff": diff})
 
     # ------------------------------------------------------------------
     def _loop(self) -> None:

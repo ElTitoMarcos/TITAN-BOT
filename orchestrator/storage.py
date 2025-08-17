@@ -392,6 +392,85 @@ class SQLiteStorage:
         return winners
 
     # ------------------------------------------------------------------
+    def gather_global_summary(self) -> Dict[str, Any]:
+        """Aggregate basic metrics across all stored data.
+
+        Returns
+        -------
+        Dict[str, Any]
+            Dictionary containing simple aggregates used for the global
+            analysis prompt. The structure intentionally remains lightweight
+            so callers are free to extend it without breaking older SQLite
+            databases. Values are best-effort; missing tables simply yield
+            empty stats instead of raising errors.
+        """
+
+        summary: Dict[str, Any] = {
+            "mutations": {},
+            "trends": [],
+            "best_pairs": [],
+            "stability": {},
+        }
+
+        with self._lock:
+            # --- Mutations usage -------------------------------------------------
+            try:
+                rows = self.conn.execute(
+                    "SELECT mutations_json FROM bots WHERE mutations_json IS NOT NULL"
+                ).fetchall()
+                counts: Dict[str, int] = {}
+                for r in rows:
+                    try:
+                        muts = json.loads(r[0] or "{}")
+                    except Exception:
+                        muts = {}
+                    for k, v in muts.items():
+                        key = f"{k}:{v}"
+                        counts[key] = counts.get(key, 0) + 1
+                summary["mutations"] = counts
+            except Exception:
+                pass
+
+            # --- PnL trend per cycle -------------------------------------------
+            try:
+                rows = self.conn.execute(
+                    "SELECT cycle_id, SUM(pnl) as pnl FROM bot_stats GROUP BY cycle_id ORDER BY cycle_id"
+                ).fetchall()
+                summary["trends"] = [
+                    {"cycle": int(r["cycle_id"]), "pnl": float(r["pnl"] or 0)}
+                    for r in rows
+                ]
+            except Exception:
+                pass
+
+            # --- Best performing symbols --------------------------------------
+            try:
+                rows = self.conn.execute(
+                    "SELECT symbol, SUM(pnl) as pnl FROM orders GROUP BY symbol ORDER BY pnl DESC LIMIT 5"
+                ).fetchall()
+                summary["best_pairs"] = [
+                    {"symbol": r["symbol"], "pnl": float(r["pnl"] or 0)}
+                    for r in rows
+                ]
+            except Exception:
+                pass
+
+            # --- Stability metrics --------------------------------------------
+            try:
+                row = self.conn.execute(
+                    "SELECT AVG(cancel_replace_count) AS crc, AVG(latency_ms) AS latency FROM orders"
+                ).fetchone()
+                summary["stability"] = {
+                    "avg_cancel_replace_count": float(row["crc"] or 0),
+                    "avg_latency_ms": float(row["latency"] or 0),
+                }
+            except Exception:
+                pass
+
+        return summary
+
+    # ------------------------------------------------------------------
+
     def close(self) -> None:
         with self._lock:
             self.conn.close()

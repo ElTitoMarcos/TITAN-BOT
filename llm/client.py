@@ -517,3 +517,79 @@ class LLMClient:
 
         winner = scored[0]
         return {"winner_bot_id": winner["bot_id"], "reason": "weighted_score"}
+
+    # ------------------------------------------------------------------
+    def analyze_global(self, summary: Dict[str, Any]) -> Dict[str, Any]:
+        """Solicita al LLM recomendaciones globales.
+
+        Parameters
+        ----------
+        summary: Dict[str, Any]
+            Resumen global recopilado por el supervisor.
+
+        Returns
+        -------
+        Dict[str, Any]
+            Diccionario con la clave ``changes`` que contiene una lista de
+            sugerencias accionables.
+        """
+
+        if self._client is not None:
+            from .prompts import PROMPT_ANALISIS_GLOBAL
+
+            messages = [
+                {"role": "system", "content": PROMPT_P0},
+                {"role": "system", "content": PROMPT_ANALISIS_GLOBAL},
+                {"role": "user", "content": json.dumps(summary)},
+            ]
+            self._log("request", {"model": self.model, "messages": messages})
+            try:
+                resp = self._client.chat.completions.create(
+                    model=self.model,
+                    temperature=0,
+                    messages=messages,
+                    timeout=40,
+                )
+                raw_txt = resp.choices[0].message.content or "{}"
+                self._log("response", raw_txt)
+                data = self._extract_json(raw_txt)
+                if isinstance(data, dict) and data.get("changes"):
+                    return {"changes": list(data.get("changes", []))}
+                self._log("response", {"error": "no json object", "raw": raw_txt})
+            except Exception as e:
+                self._log("response", {"error": str(e)})
+
+        # Fallback simple con recomendaciones deterministas
+        return {"changes": ["aumentar_timeout", "revisar_slippage", "ajustar_pesos"]}
+
+    # ------------------------------------------------------------------
+    def propose_patch(self, changes: Dict[str, Any]) -> str:
+        """Obtiene un patch unificado basado en cambios sugeridos.
+
+        Si el LLM no está disponible, devuelve una cadena vacía.
+        """
+
+        if self._client is not None:
+            from .prompts import PROMPT_PATCH_FROM_CHANGES
+
+            messages = [
+                {"role": "system", "content": PROMPT_P0},
+                {"role": "system", "content": PROMPT_PATCH_FROM_CHANGES},
+                {"role": "user", "content": json.dumps(changes)},
+            ]
+            self._log("request", {"model": self.model, "messages": messages})
+            try:
+                resp = self._client.chat.completions.create(
+                    model=self.model,
+                    temperature=0,
+                    messages=messages,
+                    timeout=40,
+                )
+                diff = resp.choices[0].message.content or ""
+                self._log("response", diff)
+                return diff
+            except Exception as e:
+                self._log("response", {"error": str(e)})
+                return ""
+
+        return ""
