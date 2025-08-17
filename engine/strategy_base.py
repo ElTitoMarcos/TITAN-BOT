@@ -17,6 +17,7 @@ from .ob_utils import (
     estimate_fill_time,
     best_price,
 )
+
 from exchange_utils.exchange_meta import exchange_meta
 from exchange_utils.orderbook_service import MarketDataHub
 
@@ -141,6 +142,7 @@ class StrategyBase:
         asset: Optional[str] = None
         fills: List[Dict[str, float]] = []
         events: List[Dict[str, Any]] = []
+
         while True:
             try:
                 order = await asyncio.to_thread(
@@ -160,6 +162,7 @@ class StrategyBase:
                         "ts": time.time(),
                         "filled_qty": filled,
                     })
+
             status = str(order.get("status", "")).upper()
             if status == "FILLED" and filled >= qty:
                 return {
@@ -172,6 +175,7 @@ class StrategyBase:
                     "actual_fill_time_s": time.time() - start,
                     "order_id": order_id,
                     "fills": fills,
+
                 }
             if time.time() - start > params.max_wait_s:
                 if (
@@ -202,6 +206,7 @@ class StrategyBase:
                                 "new_price": price,
                             }
                         )
+
                         start = time.time()
                         continue
                     except Exception:
@@ -223,6 +228,7 @@ class StrategyBase:
                     "fills": fills,
                     "aborted": True,
                 }
+
             await asyncio.sleep(1)
 
     async def monitor_buy_sim(
@@ -260,6 +266,7 @@ class StrategyBase:
                         commission = 0.0
                         if filled < qty:
                             events.append({"type": "partial_fill", "ts": time.time(), "filled_qty": filled})
+
                     if filled >= qty:
                         return {
                             "filled_qty": filled,
@@ -296,6 +303,7 @@ class StrategyBase:
                     "fills": [],
                     "aborted": True,
                 }
+
             await asyncio.sleep(1)
 
     async def submit_sell_live(self, symbol: str, price: float, qty: float) -> Dict[str, Any]:
@@ -332,6 +340,7 @@ class StrategyBase:
         asset: Optional[str] = None
         fills: List[Dict[str, float]] = []
         events: List[Dict[str, Any]] = []
+
         while True:
             try:
                 order = await asyncio.to_thread(
@@ -340,6 +349,7 @@ class StrategyBase:
             except Exception:
                 order = {}
             fqty, favg, fee, asset, fdetail = parse_fills(order)
+
             if fqty > filled:
                 filled = fqty
                 avg_price = favg or avg_price
@@ -351,6 +361,7 @@ class StrategyBase:
                         "ts": time.time(),
                         "filled_qty": filled,
                     })
+
             status = str(order.get("status", "")).upper()
             if status == "FILLED" and filled >= qty:
                 return {
@@ -363,6 +374,7 @@ class StrategyBase:
                     "actual_fill_time_s": time.time() - start,
                     "order_id": order_id,
                     "fills": fills,
+
                 }
             if time.time() - start > params.max_wait_s:
                 if (
@@ -393,6 +405,7 @@ class StrategyBase:
                                 "new_price": price,
                             }
                         )
+
                         start = time.time()
                         continue
                     except Exception:
@@ -414,6 +427,7 @@ class StrategyBase:
                     "fills": fills,
                     "aborted": True,
                 }
+
             await asyncio.sleep(1)
 
     async def monitor_sell_sim(
@@ -451,6 +465,7 @@ class StrategyBase:
                         avg_price = vwap or avg_price
                         if filled < qty:
                             events.append({"type": "partial_fill", "ts": time.time(), "filled_qty": filled})
+
                     if filled >= qty:
                         return {
                             "filled_qty": filled,
@@ -462,6 +477,7 @@ class StrategyBase:
                             "actual_fill_time_s": time.time() - start,
                             "order_id": None,
                             "fills": [],
+
                         }
             if time.time() - start > params.max_wait_s:
                 if (
@@ -487,6 +503,7 @@ class StrategyBase:
                     "fills": [],
                     "aborted": True,
                 }
+
             await asyncio.sleep(1)
 
     async def analyze_book(
