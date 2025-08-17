@@ -7,7 +7,8 @@ from typing import Dict, Any, List
 
 from config import UIColors, Defaults, AppState as CoreAppState
 from engine import Engine, load_sim_config
-from llm_client import LLMClient
+from llm_client import LLMClient as EngineLLMClient
+from llm import LLMClient as MassLLMClient
 from components.testeos_frame import TesteosFrame
 from state.app_state import AppState as MassTestState
 from orchestrator.supervisor import Supervisor
@@ -92,7 +93,9 @@ class App(tb.Window):
         self._snapshot: Dict[str, Any] = {}
         self._log_queue: "queue.Queue[str]" = queue.Queue()
         self._event_queue: "queue.Queue" = queue.Queue()
-        self._supervisor = Supervisor(app_state=self.mass_state)
+        self._supervisor = Supervisor(
+            app_state=self.mass_state, llm_client=MassLLMClient()
+        )
         self._supervisor.stream_events(lambda ev: self._event_queue.put(ev))
         self._engine_sim: Engine | None = None
         self._engine_live: Engine | None = None
@@ -412,7 +415,9 @@ class App(tb.Window):
         elif self._engine_live:
             llm = self._engine_live.llm
         else:
-            llm = LLMClient(model=self.var_llm_model.get(), api_key=self.var_oai_key.get())
+            llm = EngineLLMClient(
+                model=self.var_llm_model.get(), api_key=self.var_oai_key.get()
+            )
         resp = ""
         try:
             resp = llm.ask(query)
@@ -525,6 +530,16 @@ class App(tb.Window):
                             "cycle": ev.cycle,
                             "orders": 0,
                             "pnl": 0.0,
+                            "status": "RUNNING",
+                        }
+                    )
+                elif ev.message == "bot_progress" and ev.payload:
+                    self.testeos_frame.update_bot_row(
+                        {
+                            "bot_id": ev.bot_id,
+                            "cycle": ev.cycle,
+                            "orders": ev.payload.get("orders", 0),
+                            "pnl": ev.payload.get("pnl", 0.0),
                             "status": "RUNNING",
                         }
                     )
