@@ -11,6 +11,7 @@ from llm_client import LLMClient as EngineLLMClient
 from llm import LLMClient as MassLLMClient
 from components.testeos_frame import TesteosFrame
 from components.auth_frame import AuthFrame
+from components.info_frame import InfoFrame
 from state.app_state import AppState as MassTestState
 from orchestrator.supervisor import Supervisor
 import exchange_utils.binance_check as binance_check
@@ -106,8 +107,12 @@ class App(tb.Window):
 
         self._build_ui()
         # Instanciar LLM y supervisor después de construir UI para cablear logs
-        llm_client = MassLLMClient(on_log=self.testeos_frame.append_llm_log)
-        self._supervisor = Supervisor(app_state=self.mass_state, llm_client=llm_client)
+        llm_client = MassLLMClient(on_log=self.info_frame.append_llm_log)
+        self._supervisor = Supervisor(
+            app_state=self.mass_state,
+            llm_client=llm_client,
+            min_orders=int(self.var_min_orders.get()),
+        )
         self._supervisor.stream_events(lambda ev: self._event_queue.put(ev))
         self._load_saved_keys()
         self.auth_frame.update_badges(self.mass_state.apis_verified)
@@ -277,21 +282,15 @@ class App(tb.Window):
         self.txt_llm_resp = ScrolledText(frm_llm_manual, height=3, autohide=True, wrap="word")
         self.txt_llm_resp.grid(row=1, column=0, columnspan=2, sticky="nsew")
 
-        # Información / Razones
-        frm_info = ttk.Labelframe(right, text="Información / Razones", padding=8)
-        frm_info.grid(row=5, column=0, sticky="nsew", pady=(6, 0))
-        frm_info.rowconfigure(0, weight=1); frm_info.columnconfigure(0, weight=1); frm_info.columnconfigure(1, weight=1)
-        self.txt_info = ScrolledText(frm_info, height=6, autohide=True, wrap="word")
-        self.txt_info.grid(row=0, column=0, columnspan=2, sticky="nsew")
-        ttk.Label(frm_info, text="Órdenes mínimas").grid(row=1, column=0, sticky="w")
-        ttk.Entry(frm_info, textvariable=self.var_min_orders, width=10).grid(row=1, column=1, sticky="e")
-        ttk.Button(frm_info, text="Aplicar mín. órdenes", command=self._apply_min_orders).grid(
-            row=2, column=0, columnspan=2, sticky="ew", pady=(4, 0)
+        # Información / Razones (logs del LLM)
+        self.info_frame = InfoFrame(
+            right,
+            self.var_min_orders,
+            self._apply_min_orders,
+            self._revert_patch,
+            self._apply_winner_live,
         )
-        btn_revert = ttk.Button(frm_info, text="Revertir patch", command=self._revert_patch)
-        btn_revert.grid(row=3, column=0, sticky="ew", pady=(4,0))
-        btn_live = ttk.Button(frm_info, text="Aplicar a LIVE", command=self._apply_winner_live)
-        btn_live.grid(row=3, column=1, sticky="ew", pady=(4,0))
+        self.info_frame.grid(row=5, column=0, sticky="nsew", pady=(6, 0))
 
         # Log
         frm_log = ttk.Labelframe(right, text="Log", padding=8)
@@ -431,7 +430,7 @@ class App(tb.Window):
                     eng.llm.set_model(model)
             except Exception:
                 pass
-        self.log_append(f"[LLM] Modelo aplicado: {model}")
+        self.info_frame.append_llm_log("config", {"model": model})
 
     def _send_llm_query(self):
         query = self.var_llm_query.get().strip()
@@ -448,8 +447,11 @@ class App(tb.Window):
             )
         resp = ""
         try:
+            self.info_frame.append_llm_log("request", {"ask": query})
             resp = llm.ask(query)
-        except Exception:
+            self.info_frame.append_llm_log("response", resp)
+        except Exception as e:
+            self.info_frame.append_llm_log("response", {"error": str(e)})
             resp = ""
         self.txt_llm_resp.delete("1.0", "end")
         self.txt_llm_resp.insert("end", resp)
@@ -501,6 +503,7 @@ class App(tb.Window):
         """Aplica el mínimo de órdenes requerido para la sesión de test."""
         try:
             val = int(self.var_min_orders.get())
+            self._supervisor.set_min_orders(val)
             self.log_append(f"[TEST] Órdenes mínimas = {val}")
         except Exception:
             self.log_append("[TEST] Valor inválido para órdenes mínimas")
@@ -548,7 +551,10 @@ class App(tb.Window):
 
     # ------------------- Log helpers -------------------
     def log_append(self, msg: str):
-        self._log_queue.put(msg)
+        if msg.startswith("[LLM]"):
+            self.info_frame.append_llm_log("info", msg[5:].strip())
+        else:
+            self._log_queue.put(msg)
 
     def _poll_log_queue(self):
         try:
@@ -600,13 +606,6 @@ class App(tb.Window):
                     info = ev.payload
                     info["cycle"] = ev.cycle
                     self.testeos_frame.add_cycle_history(info)
-                elif ev.scope == "llm":
-                    if ev.message == "llm_request" and ev.payload:
-                        self.log_append(f"[LLM] request {json.dumps(ev.payload)}")
-                    elif ev.message == "llm_response" and ev.payload:
-                        self.log_append(f"[LLM] response {json.dumps(ev.payload)}")
-                    elif ev.message == "llm_error" and ev.payload:
-                        self.log_append(f"[LLM] error {ev.payload.get('error')}")
 
         except queue.Empty:
             pass
@@ -635,13 +634,9 @@ class App(tb.Window):
         except Exception:
             pass
 
-        # Razones
         reasons = snap.get("reasons", [])
-        if reasons:
-            self.txt_info.delete("1.0","end")
-            for r in reasons:
-                self.txt_info.insert("end", f"• {r}\n")
-                self.log_append(f"[ENGINE] {r}")
+        for r in reasons:
+            self.log_append(f"[ENGINE] {r}")
 
         self.after(4000, self._tick_ui_refresh)
 

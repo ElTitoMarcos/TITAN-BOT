@@ -62,22 +62,26 @@ class LLMClient:
         """
         if not self.api_key:
             self._client = None
-            
+
             return False
         try:
             import requests
 
+            url = "https://api.openai.com/v1/models"
+            self._log("request", {"url": url})
             resp = requests.get(
-                "https://api.openai.com/v1/models",
+                url,
                 headers={"Authorization": f"Bearer {self.api_key}"},
                 timeout=5,
             )
+            self._log("response", {"status": resp.status_code})
             if resp.status_code == 200:
                 return True
             self._client = None
             return False
-        except Exception:
+        except Exception as e:
             self._client = None
+            self._log("response", {"error": str(e)})
 
             return False
 
