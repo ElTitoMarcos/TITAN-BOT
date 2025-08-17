@@ -2,6 +2,7 @@
 
 import ttkbootstrap as tb
 from tkinter import ttk
+from ttkbootstrap.constants import INFO
 
 
 class SettingsFrame(ttk.Frame):
@@ -37,7 +38,9 @@ class SettingsFrame(ttk.Frame):
             bootstyle="round-toggle",
         ).grid(row=1, column=2, padx=(6, 0))
 
-        ttk.Button(frm_size, text="Aplicar", command=apply_cb).grid(row=0, column=2, padx=(6, 0))
+        ttk.Button(
+            frm_size, text="Aplicar", command=apply_cb, bootstyle=INFO
+        ).grid(row=0, column=2, padx=(6, 0))
 
         self.lbl_min_marker = ttk.Label(frm_size, text="Mínimo Binance: --")
         self.lbl_min_marker.grid(row=2, column=0, columnspan=3, sticky="w", pady=(4, 0))

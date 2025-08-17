@@ -3,6 +3,7 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk
 from typing import Callable, Dict
+from ttkbootstrap.constants import INFO
 
 
 class AuthFrame(ttk.Labelframe):
@@ -31,7 +32,9 @@ class AuthFrame(ttk.Labelframe):
         self.lbl_llm_status = ttk.Label(self, text="LLM ❌")
         self.lbl_llm_status.grid(row=2, column=3, padx=4)
 
-        self.btn_confirm = ttk.Button(self, text="Confirmar APIs", command=self._on_confirm)
+        self.btn_confirm = ttk.Button(
+            self, text="Confirmar APIs", command=self._on_confirm, bootstyle=INFO
+        )
         self.btn_confirm.grid(row=0, column=2, rowspan=3, padx=6)
 
     # ------------------------------------------------------------------
