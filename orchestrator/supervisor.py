@@ -73,7 +73,8 @@ class Supervisor:
         self._order_size_usd: float = float(self.state.order_size_usd)
         self._order_size_mode: str = str(self.state.order_size_mode)
         self._active_runners: List[Any] = []
-        self.min_orders_per_bot = int(min_orders)
+        self.min_buys_per_bot = int(min_orders)
+        self.max_orders_per_bot = self.min_buys_per_bot * 2
         self._global_thread: Optional[threading.Thread] = None
         self._global_stop: Optional[threading.Event] = None
         self._global_interval_s: int = 6 * 3600
@@ -110,8 +111,9 @@ class Supervisor:
                 pass
 
     def set_min_orders(self, num: int) -> None:
-        """Configura el mínimo de órdenes requerido por bot."""
-        self.min_orders_per_bot = int(num)
+        """Configura el mínimo de compras requerido por bot."""
+        self.min_buys_per_bot = int(num)
+        self.max_orders_per_bot = self.min_buys_per_bot * 2
 
     def set_order_size_usd(self, size: float, mode: Optional[str] = None) -> None:
         """Actualiza el tamaño por operación y lo propaga a los bots activos."""
@@ -149,6 +151,7 @@ class Supervisor:
             self._emit("ERROR", "auth", None, None, "apis_not_verified", {})
             return
         self._num_bots = num_bots
+        self.max_orders_per_bot = self.min_buys_per_bot * 2
         if not self.hub:
             try:
                 ob_service.market_data_hub.close()
@@ -396,7 +399,8 @@ class Supervisor:
 
             self._emit("INFO", "bot", cycle, cfg.id, "bot_start", {})
             start = time.time()
-            target_orders = max(self.min_orders_per_bot, random.randint(10, 100))
+            target_buys = random.randint(10, 100)
+            target_orders = target_buys * 2
             total_pnl = random.uniform(-10.0, 10.0)
             steps = max(1, target_orders // 10)
             for step in range(steps):
@@ -415,12 +419,14 @@ class Supervisor:
                 )
             pnl_pct = random.uniform(-5.0, 5.0)
             runtime_s = int(time.time() - start)
-            wins = random.randint(0, target_orders)
-            losses = target_orders - wins
+            wins = random.randint(0, target_buys)
+            losses = target_buys - wins
             stats = BotStats(
                 bot_id=cfg.id,
                 cycle=cycle,
                 orders=target_orders,
+                buys=target_buys,
+                sells=target_buys,
                 pnl=total_pnl,
                 pnl_pct=pnl_pct,
                 runtime_s=runtime_s,
@@ -428,6 +434,15 @@ class Supervisor:
                 losses=losses,
             )
             self.storage.save_bot_stats(stats)
+            if stats.buys < self.min_buys_per_bot:
+                self._emit(
+                    "WARNING",
+                    "bot",
+                    cycle,
+                    cfg.id,
+                    "min_buys_not_reached",
+                    {"buys": stats.buys, "min_buys": self.min_buys_per_bot},
+                )
             self._emit(
                 "INFO",
                 "bot",

@@ -25,6 +25,8 @@ class BotStats:
     bot_id: int
     cycle: int
     orders: int
+    buys: int
+    sells: int
     pnl: float
     pnl_pct: float
     runtime_s: int
