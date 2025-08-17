@@ -84,6 +84,7 @@ class BotRunner:
         scans = 0
         max_retries = 3
         sell_tasks: Dict[str, asyncio.Task] = {}
+
         while (
             self.orders_count < max_orders
             and scans < max_scans
