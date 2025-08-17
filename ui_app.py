@@ -359,6 +359,7 @@ class App(tb.Window):
         sec = self.var_bin_sec.get().strip()
         oai = self.var_oai_key.get().strip()
         codex_key = self.var_codex_key.get().strip()
+        os.environ["OPENAI_API_KEY"] = oai
         llm_client = MassLLMClient(api_key=oai)
         codex_client = CodexClient(api_key=codex_key)
         tasks = [
@@ -378,6 +379,10 @@ class App(tb.Window):
                     eng.llm.set_api_key(oai)
             except Exception:
                 pass
+        try:
+            self._supervisor.llm.set_api_key(oai)
+        except Exception:
+            pass
         try:
             bin_ok, llm_ok, codex_ok = await asyncio.gather(*tasks)
         except Exception:
