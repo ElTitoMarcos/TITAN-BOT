@@ -59,7 +59,7 @@ class BotRunner:
             and time.time() - start < max_runtime
         ):
             scans += 1
-            symbols = await self.strategy.select_pairs(params)
+            symbols = await self.strategy.select_pairs(params, self.hub)
             for sym in symbols:
                 if (
                     orders_count >= max_orders
