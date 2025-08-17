@@ -7,6 +7,9 @@ from typing import Any, Dict, Optional
 import requests
 from websocket import WebSocketApp
 
+from .rate_limiter import RateLimiter
+from .subscription_manager import SubscriptionManager
+
 STREAM_URL = "wss://stream.binance.com:9443/stream?streams={streams}"
 REST_DEPTH = "https://api.binance.com/api/v3/depth"
 
@@ -14,12 +17,15 @@ REST_DEPTH = "https://api.binance.com/api/v3/depth"
 class MarketDataHub:
     """Servicio que mantiene libros de órdenes usando snapshot + diffs."""
 
-    def __init__(self) -> None:
+    def __init__(self, max_depth_symbols: int = 20) -> None:
+
         self._lock = threading.RLock()
         self._books: Dict[str, Dict[str, Any]] = {}
         self._streams: Dict[str, str] = {}
         self._ws: Optional[WebSocketApp] = None
         self._running = True
+        self._rate_limiter = RateLimiter(6000)
+        self._sub_mgr = SubscriptionManager(max_depth_symbols, self.unsubscribe_depth)
         self._th = threading.Thread(target=self._run, daemon=True)
         self._th.start()
 
@@ -68,6 +74,7 @@ class MarketDataHub:
     def _fetch_snapshot(self, symbol: str) -> None:
         def worker():
             try:
+                self._rate_limiter.acquire(50)  # depth1000 weight
                 r = requests.get(
                     REST_DEPTH, params={"symbol": symbol.upper(), "limit": 1000}, timeout=10
                 )
@@ -135,6 +142,9 @@ class MarketDataHub:
     # ----------------------- API pública -----------------------
     def subscribe_depth(self, symbol: str, speed: str = "100ms") -> None:
         symbol = symbol.upper()
+        if not self._sub_mgr.request_symbol(symbol):
+            return
+
         with self._lock:
             if symbol in self._streams:
                 return
@@ -147,6 +157,7 @@ class MarketDataHub:
         with self._lock:
             self._streams.pop(symbol, None)
             self._books.pop(symbol, None)
+        self._sub_mgr.remove(symbol)
         self._reconnect()
 
     def get_order_book(self, symbol: str, top: int = 5) -> Optional[Dict[str, Any]]:
