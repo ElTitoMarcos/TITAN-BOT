@@ -39,6 +39,20 @@ class LLMClient:
                 self._client = None
 
     # ------------------------------------------------------------------
+    def set_api_key(self, api_key: str) -> None:
+        """Actualiza la clave de API y reconfigura el cliente interno."""
+        self.api_key = api_key or ""
+        if self.api_key:
+            try:
+                from openai import OpenAI  # type: ignore
+
+                self._client = OpenAI(api_key=self.api_key)
+            except Exception:
+                self._client = None
+        else:
+            self._client = None
+
+    # ------------------------------------------------------------------
     def check_credentials(self) -> bool:
         """Verifies that the configured API key is valid.
 
@@ -76,6 +90,37 @@ class LLMClient:
                 pass
 
     # ------------------------------------------------------------------
+    def _extract_json(self, txt: str) -> Optional[Any]:
+        """Intenta decodificar un JSON embebido en ``txt``.
+
+        Primero se intenta decodificar el texto completo. Si falla, se busca
+        un bloque JSON delimitado por ``[]`` o ``{}`` dentro del texto.
+        """
+        txt = txt.strip()
+        try:
+            return json.loads(txt)
+        except Exception:
+            pass
+
+        start = txt.find("[")
+        end = txt.rfind("]")
+        if start >= 0 and end > start:
+            try:
+                return json.loads(txt[start : end + 1])
+            except Exception:
+                pass
+
+        start = txt.find("{")
+        end = txt.rfind("}")
+        if start >= 0 and end > start:
+            try:
+                return json.loads(txt[start : end + 1])
+            except Exception:
+                pass
+
+        return None
+
+    # ------------------------------------------------------------------
     def _call_openai(self, trading_spec_text: str) -> List[Dict[str, object]]:
         assert self._client is not None
         messages = [
@@ -91,15 +136,16 @@ class LLMClient:
                 messages=messages,
                 timeout=40,
             )
-            txt = resp.choices[0].message.content or "[]"
-            self._log("response", txt)
-            data = json.loads(txt)
+            raw_txt = resp.choices[0].message.content or ""
+            self._log("response", raw_txt)
+            data = self._extract_json(raw_txt)
             if not isinstance(data, list):
-                raise ValueError("respuesta no es lista")
+                self._log("response", {"error": "no json array", "raw": raw_txt})
+                return []
             return data
         except Exception as e:
             self._log("response", {"error": str(e)})
-            raise
+            return []
 
     # ------------------------------------------------------------------
     def _fallback_variations(self) -> List[Dict[str, object]]:
@@ -303,14 +349,15 @@ class LLMClient:
                     messages=messages,
                     timeout=40,
                 )
-                txt = resp.choices[0].message.content or "{}"
-                self._log("response", txt)
-                data = json.loads(txt)
+                raw_txt = resp.choices[0].message.content or "{}"
+                self._log("response", raw_txt)
+                data = self._extract_json(raw_txt)
                 if isinstance(data, dict) and "winner_bot_id" in data:
                     return {
                         "winner_bot_id": int(data["winner_bot_id"]),
                         "reason": str(data.get("reason", "")),
                     }
+                self._log("response", {"error": "no json object", "raw": raw_txt})
             except Exception as e:
                 self._log("response", {"error": str(e)})
         return self._fallback_winner(cycle_summary)
