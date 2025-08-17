@@ -7,13 +7,11 @@ from ttkbootstrap.constants import *
 from ttkbootstrap.scrolled import ScrolledText
 from tkinter import ttk
 
-
 def clean_text(payload: Any) -> str:
     """Return a plain text representation without brackets, quotes or hashes."""
     text = str(payload)
     text = re.sub(r"\b[a-fA-F0-9]{64}\b", "", text)
     return text.translate(str.maketrans("", "", "{}[]\"'"))
-
 
 class InfoFrame(ttk.Labelframe):
     """Frame que muestra información y logs del LLM."""

@@ -1,5 +1,4 @@
 from typing import Callable, Dict, Any
-
 from ttkbootstrap.constants import *
 from tkinter import ttk
 import tkinter as tk
