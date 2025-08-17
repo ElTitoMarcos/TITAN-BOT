@@ -354,10 +354,20 @@ class BotRunner:
                 "timeouts": timeouts,
             },
         )
+
+        min_buys = self.limits.get("min_buys")
+        if min_buys is not None and buy_count < int(min_buys):
+            self._emit(
+                "WARNING",
+                "min_buys_not_reached",
+                {"buys": buy_count, "min_buys": int(min_buys)},
+            )
         stats = BotStats(
             bot_id=self.config.id,
             cycle=self.config.cycle,
             orders=orders_count,
+            buys=buy_count,
+            sells=sell_count,
             pnl=pnl,
             pnl_pct=pnl_pct_total,
             runtime_s=runtime_s,

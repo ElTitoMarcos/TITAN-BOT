@@ -19,6 +19,8 @@ CREATE TABLE IF NOT EXISTS bot_stats (
     bot_id INTEGER,
     cycle_id INTEGER,
     orders INTEGER,
+    buys INTEGER,
+    sells INTEGER,
     pnl REAL,
     pnl_pct REAL,
     runtime_s INTEGER,

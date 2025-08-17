@@ -32,6 +32,7 @@ class SQLiteStorage:
         # Older databases may miss recently added order columns. Ensure they
         # exist so SELECT statements do not fail.
         self._ensure_order_columns()
+        self._ensure_bot_stats_columns()
         self.conn.commit()
 
     def _ensure_order_columns(self) -> None:
@@ -73,6 +74,18 @@ class SQLiteStorage:
         for col, coltype in required.items():
             if col not in existing:
                 self.conn.execute(f"ALTER TABLE orders ADD COLUMN {col} {coltype}")
+
+    def _ensure_bot_stats_columns(self) -> None:
+        """Add missing columns to bot_stats table for backward compatibility."""
+
+        required = {"buys": "INTEGER", "sells": "INTEGER"}
+        existing = {
+            row[1]
+            for row in self.conn.execute("PRAGMA table_info(bot_stats)").fetchall()
+        }
+        for col, coltype in required.items():
+            if col not in existing:
+                self.conn.execute(f"ALTER TABLE bot_stats ADD COLUMN {col} {coltype}")
 
     # ------------------------------------------------------------------
     # Events
@@ -194,10 +207,12 @@ class SQLiteStorage:
             self.conn.execute(
                 """
                 INSERT INTO bot_stats (
-                    bot_id, cycle_id, orders, pnl, pnl_pct, runtime_s, wins, losses, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    bot_id, cycle_id, orders, buys, sells, pnl, pnl_pct, runtime_s, wins, losses, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(bot_id, cycle_id) DO UPDATE SET
                     orders=excluded.orders,
+                    buys=excluded.buys,
+                    sells=excluded.sells,
                     pnl=excluded.pnl,
                     pnl_pct=excluded.pnl_pct,
                     runtime_s=excluded.runtime_s,
@@ -209,6 +224,8 @@ class SQLiteStorage:
                     stats.bot_id,
                     stats.cycle,
                     stats.orders,
+                    stats.buys,
+                    stats.sells,
                     stats.pnl,
                     stats.pnl_pct,
                     stats.runtime_s,
@@ -219,7 +236,7 @@ class SQLiteStorage:
 
     def get_bot_stats(self, bot_id: int, cycle: Optional[int] = None) -> Optional[BotStats]:
         query = (
-            "SELECT bot_id, cycle_id, orders, pnl, pnl_pct, runtime_s, wins, losses "
+            "SELECT bot_id, cycle_id, orders, buys, sells, pnl, pnl_pct, runtime_s, wins, losses "
             "FROM bot_stats WHERE bot_id = ?"
         )
         params: List[Any] = [bot_id]
@@ -235,6 +252,8 @@ class SQLiteStorage:
             bot_id=row["bot_id"],
             cycle=row["cycle_id"],
             orders=row["orders"],
+            buys=row["buys"],
+            sells=row["sells"],
             pnl=row["pnl"],
             pnl_pct=row["pnl_pct"],
             runtime_s=row["runtime_s"],
@@ -243,7 +262,7 @@ class SQLiteStorage:
         )
 
     def iter_stats(self, cycle: Optional[int] = None) -> List[BotStats]:
-        query = "SELECT bot_id, cycle_id, orders, pnl, pnl_pct, runtime_s, wins, losses FROM bot_stats"
+        query = "SELECT bot_id, cycle_id, orders, buys, sells, pnl, pnl_pct, runtime_s, wins, losses FROM bot_stats"
         params: List[Any] = []
         if cycle is not None:
             query += " WHERE cycle_id = ?"
@@ -255,6 +274,8 @@ class SQLiteStorage:
                 bot_id=r["bot_id"],
                 cycle=r["cycle_id"],
                 orders=r["orders"],
+                buys=r["buys"],
+                sells=r["sells"],
                 pnl=r["pnl"],
                 pnl_pct=r["pnl_pct"],
                 runtime_s=r["runtime_s"],
@@ -505,6 +526,8 @@ class SQLiteStorage:
                     "mutations": cfg.mutations if cfg else {},
                     "stats": {
                         "orders": s.orders,
+                        "buys": s.buys,
+                        "sells": s.sells,
                         "pnl": s.pnl,
                         "pnl_pct": s.pnl_pct,
                         "win_rate": s.wins / s.orders if s.orders else 0.0,
