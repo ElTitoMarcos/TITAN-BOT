@@ -15,56 +15,25 @@ import time
 from typing import Any, Dict, Tuple, Optional, List
 
 from exchange_utils.exchange_meta import exchange_meta
+from trading.order_lifecycle import OrderLifecycle
 
 
 def place_limit(exchange: Any, symbol: str, side: str, price: float, qty: float) -> Dict[str, Any]:
-    """Place a limit order ensuring it complies with exchange filters.
+    """Deprecated thin wrapper around :class:`trading.order_lifecycle.OrderLifecycle`.
 
-    Parameters
-    ----------
-    exchange:
-        ccxt-like client exposing ``create_order`` and ``fetch_order``.
-    symbol:
-        Trading pair symbol.
-    side:
-        ``"buy"`` or ``"sell"``.
-    price:
-        Desired price before rounding.
-    qty:
-        Desired quantity before rounding.
-
-    Returns
-    -------
-    dict
-        Order information as returned by the exchange after creation.
-
-    Raises
-    ------
-    ValueError
-        If the resulting notional is below ``minNotional`` or rounding
-        results in zero quantity.
+    Prefer instantiating :class:`OrderLifecycle` and calling
+    :meth:`OrderLifecycle.open_limit` directly.
     """
 
-    price, qty, _ = exchange_meta.round_price_qty(symbol, price, qty)
-    if qty <= 0:
-        raise ValueError("quantity rounded to zero")
-
-    try:
-        order = exchange.create_order(symbol, "limit", side, qty, price)
-    except Exception as exc:  # pragma: no cover - transport errors hard to simulate
-        # Binance uses error -1007 when order creation times out but the order
-        # might have been accepted. In such case we cannot know the order id.
-        code = getattr(exc, "code", None)
-        if code == -1007:
-            raise TimeoutError("order creation timeout") from exc
-        raise
-    return order
+    ol = OrderLifecycle(exchange, mode="LIVE", default_qty=qty)
+    return ol.open_limit(side, symbol, price)
 
 
 def cancel_order(exchange: Any, symbol: str, order_id: str) -> Dict[str, Any]:
-    """Cancel an existing order."""
+    """Deprecated thin wrapper around :class:`OrderLifecycle.cancel`."""
 
-    return exchange.cancel_order(order_id, symbol)
+    ol = OrderLifecycle(exchange, mode="LIVE")
+    return ol.cancel({"id": order_id, "symbol": symbol}) or {}
 
 
 def cancel_replace(
