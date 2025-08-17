@@ -95,4 +95,10 @@ class ExchangeMeta:
             raise ValueError("notional below minNotional")
         return price, qty, filters
 
+    # Convenience helper -------------------------------------------------
+    def price_filters(self, symbol: str) -> Dict[str, Any]:
+        """Expose cached filters for external modules."""
+
+        return self.get_symbol_filters(symbol)
+
 exchange_meta = ExchangeMeta()

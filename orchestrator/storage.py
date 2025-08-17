@@ -282,7 +282,7 @@ class SQLiteStorage:
         "pnl",
         "pnl_pct",
         "notes",
-        "raw_json",
+        "raw_json",  # JSON blob with extended metrics
         "expected_profit_ticks",
         "actual_profit_ticks",
         "spread_ticks",

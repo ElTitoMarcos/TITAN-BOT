@@ -7,6 +7,8 @@ from typing import Any, Dict, Optional
 import requests
 from websocket import WebSocketApp
 
+from engine.ob_utils import book_hash
+
 from .rate_limiter import RateLimiter
 from .subscription_manager import SubscriptionManager
 
@@ -174,6 +176,14 @@ class MarketDataHub:
                 "ts": book.get("ts", 0.0),
                 "lastUpdateId": book.get("lastUpdateId", 0),
             }
+
+    def get_order_book_hash(self, symbol: str, depth: int = 5) -> Optional[str]:
+        """Return a stable hash of the current order book."""
+
+        book = self.get_order_book(symbol, top=depth)
+        if not book:
+            return None
+        return book_hash(book, depth)
 
     def get_trade_rate(
         self, symbol: str, price: float, side: str, lookback_s: int = 60
