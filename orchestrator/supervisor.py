@@ -110,6 +110,7 @@ class Supervisor:
             try:
                 decision = self.llm.analyze_cycle_and_pick_winner(cycle_summary)
                 self._emit("INFO", "llm", cycle, None, "llm_response", decision)
+
                 winner_id = int(decision.get("winner_bot_id", -1))
                 winner_reason = str(decision.get("reason", ""))
                 winner_cfg = self.storage.get_bot(winner_id)
