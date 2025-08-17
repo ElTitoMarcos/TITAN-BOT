@@ -12,6 +12,7 @@ from llm import LLMClient as MassLLMClient
 from components.testeos_frame import TesteosFrame
 from state.app_state import AppState as MassTestState
 from orchestrator.supervisor import Supervisor
+from exchange_utils.orderbook_service import market_data_hub
 
 BADGE_SIM = "🔧SIM"
 BADGE_LIVE = "⚡LIVE"

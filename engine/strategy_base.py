@@ -6,6 +6,7 @@ import time
 from typing import Any, Dict, Iterable, List, Tuple
 
 from .strategy_params import Params
+from .ob_utils import compute_imbalance, compute_spread_ticks, try_fill_limit
 
 
 class StrategyBase:
@@ -40,17 +41,18 @@ class StrategyBase:
         book = await self.exchange.get_order_book(symbol)
         bids = book.get("bids", [])
         asks = book.get("asks", [])
-        bid_price, bid_qty = bids[0]
-        ask_price, ask_qty = asks[0]
-        imbalance = bid_qty / (bid_qty + ask_qty) * 100 if (bid_qty + ask_qty) else 0
-        if imbalance < params.imbalance_buy_threshold_pct:
+        bid_price, _ = bids[0]
+        ask_price, _ = asks[0]
+        imbalance_ratio = compute_imbalance(book)
+        imbalance_pct = imbalance_ratio * 100.0
+        if imbalance_pct < params.imbalance_buy_threshold_pct:
             raise RuntimeError("bid imbalance too low")
         info = await self.exchange.get_market(symbol)
         tick = float(info.get("price_increment", 1e-8))
         amount = params.order_size_usd / ask_price
-        spread_ticks = (ask_price - bid_price) / tick if tick else 0.0
+        spread_ticks = compute_spread_ticks(book, tick)
         order = await self.exchange.create_limit_buy_order(symbol, amount, ask_price)
-        order.update({"imbalance_pct": imbalance, "spread_ticks": spread_ticks, "tick_size": tick})
+        order.update({"imbalance_pct": imbalance_pct, "spread_ticks": spread_ticks, "tick_size": tick})
         return order
 
     async def place_sell_plus_ticks(self, params: Params, symbol: str, buy_order: Dict[str, Any]) -> Dict[str, Any]:
@@ -72,10 +74,18 @@ class StrategyBase:
         start = time.time()
         for buy, sell in orders:
             await asyncio.sleep(0)  # simulation: instant fills
+            book = await order_book_provider.get_order_book(buy["symbol"])
+            buy_qty, buy_vwap = try_fill_limit(book, "buy", buy["price"], buy["amount"])
+            sell_qty, sell_vwap = try_fill_limit(book, "sell", sell["price"], sell["amount"])
+            qty = min(buy_qty, sell_qty)
             hold = time.time() - start
-            pnl = (sell["price"] - buy["price"]) * buy["amount"]
-            notional = buy["price"] * buy["amount"]
-            pnl_pct = (pnl / notional * 100.0) if notional else 0.0
+            if qty and buy_vwap is not None and sell_vwap is not None:
+                pnl = (sell_vwap - buy_vwap) * qty
+                notional = buy_vwap * qty
+                pnl_pct = (pnl / notional * 100.0) if notional else 0.0
+            else:
+                pnl = 0.0
+                pnl_pct = 0.0
             updates.append(
                 {
                     "symbol": buy["symbol"],
