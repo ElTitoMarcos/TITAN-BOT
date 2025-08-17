@@ -1,4 +1,6 @@
+import os
 import tkinter as tk
+import pytest
 
 from components.info_frame import InfoFrame
 
@@ -7,6 +9,7 @@ def _dummy():
     pass
 
 
+@pytest.mark.skipif(os.environ.get("DISPLAY", "") == "", reason="requires display")
 def test_logging_and_controls():
     root = tk.Tk()
     root.withdraw()

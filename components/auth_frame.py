@@ -3,6 +3,7 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk
 from typing import Callable, Dict
+from ttkbootstrap.constants import INFO
 
 
 class AuthFrame(ttk.Labelframe):
@@ -20,7 +21,7 @@ class AuthFrame(ttk.Labelframe):
 
         ttk.Label(self, text="Binance KEY").grid(row=0, column=0, sticky="w")
         ttk.Entry(self, textvariable=self.var_bin_key, width=28).grid(row=0, column=1, sticky="ew")
-        self.lbl_bin_status = ttk.Label(self, text="❌")
+        self.lbl_bin_status = ttk.Label(self, text="Binance ❌")
         self.lbl_bin_status.grid(row=0, column=3, padx=4)
 
         ttk.Label(self, text="Binance SECRET").grid(row=1, column=0, sticky="w")
@@ -28,10 +29,12 @@ class AuthFrame(ttk.Labelframe):
 
         ttk.Label(self, text="ChatGPT API Key").grid(row=2, column=0, sticky="w")
         ttk.Entry(self, textvariable=self.var_oai_key, width=28, show="•").grid(row=2, column=1, sticky="ew")
-        self.lbl_llm_status = ttk.Label(self, text="❌")
+        self.lbl_llm_status = ttk.Label(self, text="LLM ❌")
         self.lbl_llm_status.grid(row=2, column=3, padx=4)
 
-        self.btn_confirm = ttk.Button(self, text="Confirmar APIs", command=self._on_confirm)
+        self.btn_confirm = ttk.Button(
+            self, text="Confirmar APIs", command=self._on_confirm, bootstyle=INFO
+        )
         self.btn_confirm.grid(row=0, column=2, rowspan=3, padx=6)
 
     # ------------------------------------------------------------------
@@ -46,8 +49,12 @@ class AuthFrame(ttk.Labelframe):
     # ------------------------------------------------------------------
     def update_badges(self, status: Dict[str, bool]) -> None:
         """Actualiza badges de estado para cada servicio."""
-        self.lbl_bin_status.configure(text="✅" if status.get("binance") else "❌")
-        self.lbl_llm_status.configure(text="✅" if status.get("llm") else "❌")
+        self.lbl_bin_status.configure(
+            text=f"Binance {'✅' if status.get('binance') else '❌'}"
+        )
+        self.lbl_llm_status.configure(
+            text=f"LLM {'✅' if status.get('llm') else '❌'}"
+        )
         try:
             self.btn_confirm.configure(state="normal")
         except Exception:

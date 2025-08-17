@@ -102,7 +102,10 @@ class TesteosFrame(ttk.Frame):
         ).grid(row=0, column=8)
 
         ttk.Button(
-            side, text="Subir Bot Sim", command=self.on_load_winner_for_sim
+            side,
+            text="Subir Bot Sim",
+            command=self.on_load_winner_for_sim,
+            bootstyle=INFO,
         ).grid(row=1, column=0, sticky="w", pady=(8, 0))
 
         self.lbl_winner = ttk.Label(side, text="Ganador: -", anchor="w")
