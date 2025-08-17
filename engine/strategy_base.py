@@ -9,7 +9,6 @@ from .strategy_params import Params
 from .ob_utils import book_hash, compute_imbalance, compute_spread_ticks
 from exchange_utils.exchange_meta import exchange_meta
 
-
 class StrategyBase:
     """Execute the base BTC strategy under mutable parameters."""
 
@@ -83,6 +82,7 @@ class StrategyBase:
             tick = float(filters.get("priceIncrement", tick))
         else:
             amount = raw_amount
+
         spread_ticks = compute_spread_ticks(book, tick)
         top3 = {"bids": bids[:3], "asks": asks[:3]}
         latency_ms = int((time.time() - book.get("ts", time.time())) * 1000)
@@ -117,3 +117,6 @@ class StrategyBase:
             "tick_size": tick,
         }
 
+        tick = buy_order.get("tick_size", 0.0)
+        price = buy_order["price"] + tick * params.sell_k_ticks
+        return {"symbol": buy_order["symbol"], "price": price, "amount": buy_order["amount"], "tick_size": tick}
