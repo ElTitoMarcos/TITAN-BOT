@@ -32,6 +32,7 @@ class Engine(threading.Thread):
         self._open_orders: Dict[str, Dict[str, Any]] = {}
         self._closed_orders: List[Dict[str, Any]] = []
         self._positions: Dict[str, Dict[str, Any]] = {}
+        self._pending_buys: Dict[str, Dict[str, Any]] = {}
         self._last_reasons: List[str] = []
         self._first_call_done: bool = False
         self._last_auto_ts: float = 0.0
@@ -122,7 +123,7 @@ class Engine(threading.Thread):
         return oid
 
     def _try_fill_sim_orders(self, snapshot: Dict[str, Any]):
-        # Revisa órdenes SIM y llena si cruza best bid/ask y llega su ETA
+        # Revisa órdenes SIM usando datos del libro para simular espera
         now_ms = time.time() * 1000
         pairs = snapshot.get("pairs", [])
         to_close: List[str] = []
@@ -135,7 +136,7 @@ class Engine(threading.Thread):
                 continue
             best_ask = par.get("best_ask", 0.0)
             best_bid = par.get("best_bid", 0.0)
-            eta = float(o.get("eta", 0.0))
+            flow_ratio = par.get("trade_flow", {}).get("buy_ratio", 0.5)
             if o["side"] == "buy":
                 if best_bid and o["price"] < best_bid:
                     self._open_orders.pop(oid, None)
@@ -148,6 +149,9 @@ class Engine(threading.Thread):
                     self._open_orders.pop(oid, None)
                     self._log_audit("CANCEL", sym, "bid support <=10%")
                     continue
+                pressure = max(0.1, 1.0 - flow_ratio)
+                wait_ms = int(1000 * (ask_qty / pressure))
+                eta = o.setdefault("eta", now_ms + wait_ms)
                 if best_ask and o["price"] >= best_ask and now_ms >= eta:
                     self._register_fill(o, fill_price=best_ask)
                     to_close.append(oid)
@@ -156,6 +160,10 @@ class Engine(threading.Thread):
                     self._open_orders.pop(oid, None)
                     self._log_audit("CANCEL", sym, "sell not at top ask")
                     continue
+                pressure = max(0.1, flow_ratio)
+                bid_qty = par.get("bid_top_qty", 0.0)
+                wait_ms = int(1000 * (bid_qty / pressure))
+                eta = o.setdefault("eta", now_ms + wait_ms)
                 if best_bid and o["price"] <= best_bid and now_ms >= eta:
                     self._register_fill(o, fill_price=best_bid)
                     to_close.append(oid)
@@ -170,28 +178,49 @@ class Engine(threading.Thread):
         pos = self._positions.setdefault(sym, {"qty": 0.0, "avg": 0.0})
         if side == "buy":
             new_qty = pos["qty"] + qty_base
-            pos["avg"] = (pos["avg"]*pos["qty"] + qty_base*fill_price) / max(1e-12, new_qty)
+            pos["avg"] = (pos["avg"] * pos["qty"] + qty_base * fill_price) / max(
+                1e-12, new_qty
+            )
             pos["qty"] = new_qty
+            self._pending_buys[sym] = {
+                "price": fill_price,
+                "qty_usd": qty_usd,
+                "ts": int(time.time() * 1000),
+            }
+            self._log_audit(
+                "FILL", sym, f"BUY {qty_usd:.2f} USD @ {fill_price} ({order.get('mode')})"
+            )
+            self.ui_log(
+                f"[ENGINE {self.name}] FILL BUY {sym} {qty_usd:.2f} @ {fill_price}"
+            )
         else:
             pos["qty"] = pos["qty"] - qty_base
-        trade = {
-            "id": order.get("id",""),
-            "symbol": sym,
-            "side": side,
-            "price": fill_price,
-            "qty_usd": qty_usd,
-            "mode": order.get("mode","SIM"),
-            "ts": int(time.time()*1000)
-        }
-        self._closed_orders.append(trade)
-        self._log_audit("FILL", sym, f"{side.upper()} {qty_usd:.2f} USD @ {fill_price} ({order.get('mode')})")
-        self.ui_log(
-            f"[ENGINE {self.name}] FILL {side.upper()} {sym} {qty_usd:.2f} @ {fill_price}"
-        )
-        try:
-            self.order_hook(trade)
-        except Exception:
-            pass
+            buy = self._pending_buys.pop(sym, None)
+            pnl = 0.0
+            if buy:
+                qty_b = buy["qty_usd"] / max(1e-12, buy["price"])
+                pnl = (fill_price - buy["price"]) * qty_b
+            trade = {
+                "id": order.get("id", ""),
+                "symbol": sym,
+                "side": side,
+                "price": fill_price,
+                "qty_usd": qty_usd,
+                "mode": order.get("mode", "SIM"),
+                "ts": int(time.time() * 1000),
+                "pnl_usd": pnl,
+            }
+            self._closed_orders.append(trade)
+            self._log_audit(
+                "FILL", sym, f"SELL {qty_usd:.2f} USD @ {fill_price} ({order.get('mode')})"
+            )
+            self.ui_log(
+                f"[ENGINE {self.name}] FILL SELL {sym} {qty_usd:.2f} @ {fill_price}"
+            )
+            try:
+                self.order_hook(trade)
+            except Exception:
+                pass
 
     def _sim_mark_to_market(self, pairs: List[Dict[str, Any]]):
         pnl_usd = 0.0
