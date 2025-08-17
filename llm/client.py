@@ -105,17 +105,30 @@ class LLMClient:
                 messages=messages,
                 timeout=40,
             )
-            txt = resp.choices[0].message.content or "[]"
-            self._log("response", txt)
+            raw_txt = resp.choices[0].message.content or ""
+            self._log("response", raw_txt)
+            txt = raw_txt.strip()
+            if not txt:
+                return []
             try:
                 data = json.loads(txt)
-                if not isinstance(data, list):
-                    self._log("response", {"error": "respuesta no es lista", "raw": txt})
+            except Exception:
+                start = txt.find("[")
+                end = txt.rfind("]")
+                if start >= 0 and end > start:
+                    try:
+                        data = json.loads(txt[start : end + 1])
+                    except Exception as e2:
+                        self._log("response", {"error": str(e2), "raw": txt})
+                        return []
+                else:
+                    self._log("response", {"error": "no json array", "raw": txt})
                     return []
-                return data
-            except Exception as e:
-                self._log("response", {"error": str(e), "raw": txt})
+            if not isinstance(data, list):
+                self._log("response", {"error": "respuesta no es lista", "raw": txt})
                 return []
+            return data
+
         except Exception as e:
             self._log("response", {"error": str(e)})
             return []
