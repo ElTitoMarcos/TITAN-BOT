@@ -163,15 +163,20 @@ class App(tb.Window):
         self.lbl_pnl.grid(row=1, column=2, sticky="e", padx=5)
         self.lbl_bal.grid(row=1, column=3, sticky="e", padx=5)
 
-        # Pestañas principales
-        self.notebook = ttk.Notebook(self)
-        self.notebook.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=(10,10), pady=(0,8))
+        # Panel fijo para testeos masivos
         self.testeos_frame = TesteosFrame(
-            self.notebook,
+            self,
             self.on_toggle_mass_tests,
             self.on_load_winner_for_sim,
         )
-        self.notebook.add(self.testeos_frame, text="Testeos Masivos")
+        self.testeos_frame.grid(
+            row=1,
+            column=0,
+            columnspan=2,
+            sticky="nsew",
+            padx=(10, 10),
+            pady=(0, 8),
+        )
 
         # Panel inferior izquierdo para órdenes
         left = ttk.Frame(self, padding=(10,0,10,10))
