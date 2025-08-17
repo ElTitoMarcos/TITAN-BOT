@@ -5,7 +5,7 @@ from typing import Any, Callable, Dict, Optional
 
 from data_logger import log_event
 from exchange_utils.exchange_meta import exchange_meta
-
+from .modes import get_mode_filler, BaseModeFiller
 
 class OrderLifecycle:
     """Manage the lifecycle of a single limit order.
@@ -65,7 +65,7 @@ class OrderLifecycle:
         side: str,
         symbol: str,
         price: float,
-        mode: Optional[str] = None,
+        mode: Optional[str | BaseModeFiller] = None,
     ) -> Dict[str, Any]:
         """Open a limit order.
 
@@ -77,7 +77,8 @@ class OrderLifecycle:
         mode: execution mode overriding the instance level ``mode``.
         """
 
-        use_mode = (mode or self.mode).upper()
+        filler = self._resolve_mode(mode)
+        use_mode = self._mode_of(filler)
         if self.current_order and str(self.current_order.get("status", "")).upper() in {
             "NEW",
             "PARTIALLY_FILLED",
@@ -89,9 +90,12 @@ class OrderLifecycle:
         if qty <= 0:
             raise ValueError("quantity rounded to zero")
 
+        draft = {"symbol": symbol, "side": side, "price": price, "amount": qty}
+        draft = filler.prepare_open(draft)
+
         if use_mode == "LIVE":
             try:
-                order = self.exchange.create_order(symbol, "limit", side, qty, price)
+                order = self.exchange.create_order(symbol, "limit", side, draft["amount"], draft["price"])
             except Exception as exc:
                 code = getattr(exc, "code", None)
                 if code == -1007:  # Binance timeout yet order may exist
@@ -102,8 +106,8 @@ class OrderLifecycle:
                 "id": f"SIM-{int(time.time()*1000)}",
                 "symbol": symbol,
                 "side": side,
-                "price": price,
-                "amount": qty,
+                "price": draft["price"],
+                "amount": draft["amount"],
                 "status": "NEW",
                 "filled": 0.0,
             }
@@ -114,48 +118,40 @@ class OrderLifecycle:
         return order
 
     # ------------------------------------------------------------------
-    def start_monitoring(self, order: Dict[str, Any], mode: Optional[str] = None) -> None:
-        """Poll ``order`` until completion, firing callbacks on progress."""
+    def start_monitoring(
+        self,
+        order: Dict[str, Any],
+        mode: Optional[str | BaseModeFiller] = None,
+        market_snapshot: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Poll ``order`` until completion, delegating to mode specific fillers."""
 
-        use_mode = (mode or self.mode).upper()
+        filler = self._resolve_mode(mode)
         symbol = order.get("symbol")
         order_id = order.get("id")
-        if use_mode != "LIVE":
-            order["status"] = "FILLED"
-            order["filled"] = order.get("amount", self.default_qty)
-            log_event({"event": "order_filled", "symbol": symbol, "order_id": order_id, "qty": order["filled"]})
-            if self.on_filled:
-                self.on_filled(order)
-            self.current_order = None
-            return
-
-        filled_qty = 0.0
+        last_qty = float(order.get("filled") or 0.0)
         while True:
-            try:
-                info = self.exchange.fetch_order(order_id, symbol)
-            except Exception:
-                time.sleep(1)
-                continue
-            fqty = float(info.get("filled") or info.get("executedQty") or 0.0)
-            status = str(info.get("status", "")).upper()
-            if fqty > filled_qty and fqty < info.get("amount", 0.0):
-                filled_qty = fqty
-                log_event({"event": "order_partial", "symbol": symbol, "order_id": order_id, "qty": fqty})
+            evt = filler.tick(order, market_snapshot or {})
+            filled = float(order.get("filled") or 0.0)
+            status = str(order.get("status", "")).upper()
+            if evt or (filled > last_qty and status not in {"FILLED", "CANCELED"}):
+                last_qty = filled
+                log_event({"event": "order_partial", "symbol": symbol, "order_id": order_id, "qty": filled})
                 if self.on_partial_fill:
-                    self.on_partial_fill(info)
+                    self.on_partial_fill(order)
             if status == "FILLED":
-                log_event({"event": "order_filled", "symbol": symbol, "order_id": order_id, "qty": info.get("filled", fqty)})
+                log_event({"event": "order_filled", "symbol": symbol, "order_id": order_id, "qty": filled})
                 if self.on_filled:
-                    self.on_filled(info)
+                    self.on_filled(order)
                 self.current_order = None
                 return
             if status == "CANCELED":
                 log_event({"event": "order_canceled", "symbol": symbol, "order_id": order_id})
                 if self.on_canceled:
-                    self.on_canceled(info)
+                    self.on_canceled(order)
                 self.current_order = None
                 return
-            time.sleep(1)
+            time.sleep(filler.latency_s(1))
 
     # ------------------------------------------------------------------
     def cancel(self, order: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -177,3 +173,13 @@ class OrderLifecycle:
         finally:
             self.current_order = None
         return result
+
+    # ------------------------------------------------------------------
+    def _resolve_mode(self, mode: Optional[str | BaseModeFiller]) -> BaseModeFiller:
+        if hasattr(mode, "tick"):
+            return mode  # type: ignore[return-value]
+        use_mode = (mode or self.mode).upper()
+        return get_mode_filler(use_mode, self.exchange)
+
+    def _mode_of(self, filler: BaseModeFiller) -> str:
+        return filler.__class__.__name__.replace("ModeFiller", "").upper()
