@@ -7,6 +7,8 @@ from typing import Any, Dict, Optional
 import requests
 from websocket import WebSocketApp
 
+from engine.ob_utils import book_hash
+
 from .rate_limiter import RateLimiter
 from .subscription_manager import SubscriptionManager
 
@@ -21,6 +23,7 @@ class MarketDataHub:
 
         self._lock = threading.RLock()
         self._books: Dict[str, Dict[str, Any]] = {}
+        self._tickers: Dict[str, Dict[str, float]] = {}
         self._streams: Dict[str, str] = {}
         self._ws: Optional[WebSocketApp] = None
         self._running = True
@@ -98,6 +101,23 @@ class MarketDataHub:
             payload = json.loads(msg)
             stream = payload.get("stream", "")
             data = payload.get("data", {})
+            if stream == "!bookTicker":
+                symbol = data.get("s")
+                if not symbol:
+                    return
+                bid = float(data.get("b", 0.0))
+                ask = float(data.get("a", 0.0))
+                bid_qty = float(data.get("B", 0.0))
+                ask_qty = float(data.get("A", 0.0))
+                with self._lock:
+                    self._tickers[symbol] = {
+                        "bid": bid,
+                        "ask": ask,
+                        "bid_qty": bid_qty,
+                        "ask_qty": ask_qty,
+                        "ts": time.time(),
+                    }
+                return
             if "@depth" not in stream:
                 return
             symbol = data.get("s")
@@ -174,6 +194,22 @@ class MarketDataHub:
                 "ts": book.get("ts", 0.0),
                 "lastUpdateId": book.get("lastUpdateId", 0),
             }
+
+    def get_book_ticker(self, symbol: str) -> Optional[Dict[str, float]]:
+        symbol = symbol.upper()
+        with self._lock:
+            data = self._tickers.get(symbol)
+            if not data:
+                return None
+            return dict(data)
+
+    def get_order_book_hash(self, symbol: str, depth: int = 5) -> Optional[str]:
+        """Return a stable hash of the current order book."""
+
+        book = self.get_order_book(symbol, top=depth)
+        if not book:
+            return None
+        return book_hash(book, depth)
 
     def get_trade_rate(
         self, symbol: str, price: float, side: str, lookback_s: int = 60

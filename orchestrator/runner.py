@@ -59,7 +59,7 @@ class BotRunner:
             and time.time() - start < max_runtime
         ):
             scans += 1
-            symbols = await self.strategy.select_pairs(params)
+            symbols = await self.strategy.select_pairs(params, self.hub)
             for sym in symbols:
                 if (
                     orders_count >= max_orders
@@ -157,6 +157,13 @@ class BotRunner:
                     buy_vwap = buy_price
                     buy_metrics["actual_fill_time_s"] = t_est
 
+                buy_metrics["slippage_ticks"] = int(
+                    round((buy_vwap - buy_price) / tick)
+                ) if buy_vwap is not None else None
+                buy_metrics["monitor_events"] = []
+                buy_metrics["commission_paid"] = None
+                buy_metrics["commission_asset"] = None
+
                 log_event(
                     {
                         "event": "buy_order",
@@ -231,6 +238,13 @@ class BotRunner:
                     sell_vwap = sell_price
                     sell_metrics["actual_fill_time_s"] = t_est2
 
+                sell_metrics["slippage_ticks"] = int(
+                    round((sell_vwap - sell_price) / tick)
+                ) if sell_vwap is not None else None
+                sell_metrics["monitor_events"] = []
+                sell_metrics["commission_paid"] = None
+                sell_metrics["commission_asset"] = None
+
                 log_event(
                     {
                         "event": "sell_order",
@@ -291,6 +305,7 @@ class BotRunner:
                         {
                             "price": buy_price,
                             "amount": amount,
+                            "book_hash": buy_data.get("book_hash"),
                             **(buy_metrics or {}),
                         }
                     ),
@@ -325,6 +340,7 @@ class BotRunner:
                         {
                             "price": sell_price,
                             "amount": amount,
+                            "book_hash": buy_data.get("book_hash"),
                             **(sell_metrics or {}),
                         }
                     ),

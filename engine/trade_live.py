@@ -12,7 +12,7 @@ blocking the event loop.
 from __future__ import annotations
 
 import time
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
 
 from exchange_utils.exchange_meta import exchange_meta
 
@@ -67,6 +67,36 @@ def cancel_order(exchange: Any, symbol: str, order_id: str) -> Dict[str, Any]:
     return exchange.cancel_order(order_id, symbol)
 
 
+def cancel_replace(
+    exchange: Any,
+    symbol: str,
+    order_id: str,
+    side: str,
+    new_price: float,
+    qty: float,
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Cancel an order and place a new one with ``new_price``.
+
+    Parameters
+    ----------
+    exchange: ccxt-like client
+    symbol: trading pair
+    order_id: id of the order to cancel
+    side: "buy" or "sell"
+    new_price: desired new price before rounding
+    qty: quantity to use for the new order before rounding
+
+    Returns
+    -------
+    tuple(dict, dict)
+        Tuple of (cancel_result, new_order).
+    """
+
+    cancel_res = cancel_order(exchange, symbol, order_id)
+    new_order = place_limit(exchange, symbol, side, new_price, qty)
+    return cancel_res, new_order
+
+
 def fetch_order_status(
     exchange: Any, symbol: str, order_id: str, timeout_s: float = 10.0
 ) -> Dict[str, Any]:
@@ -87,7 +117,9 @@ def fetch_order_status(
             if status in {"FILLED", "PARTIALLY_FILLED", "NEW", "REJECTED", "CANCELED"}:
                 return order
         except Exception as exc:  # pragma: no cover - network issues
-            last_exc = exc
+            code = getattr(exc, "code", None)
+            if code != -1007:
+                last_exc = exc
         time.sleep(delay)
         delay = min(delay * 1.5, 2.0)
     if last_exc:

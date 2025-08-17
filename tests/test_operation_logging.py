@@ -10,7 +10,7 @@ from engine.strategy_params import Params
 
 
 class DummyStrategy:
-    async def select_pairs(self, params: Params):
+    async def select_pairs(self, params: Params, hub):
         return ["ETHUSDT"]
 
     async def analyze_book(self, params: Params, symbol: str, book, mode="SIM"):
