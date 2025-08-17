@@ -129,9 +129,12 @@ class TesteosFrame(ttk.Frame):
             row=4, column=0, sticky="w", pady=(8, 0)
         )
         self.txt_winner = ScrolledText(
-            side, height=6, autohide=True, wrap="word", state="disabled"
+            side, height=6, autohide=True, wrap="word"
         )
         self.txt_winner.grid(row=5, column=0, sticky="nsew", pady=(4, 0))
+        # ScrolledText no expone directamente la opción ``state``; hay que
+        # configurarla en el widget Text subyacente.
+        self.txt_winner.text.configure(state="disabled")
 
 
     def _toggle(self) -> None:
@@ -203,11 +206,12 @@ class TesteosFrame(ttk.Frame):
 
     def _show_winner_reason(self, reason: str) -> None:
         """Display the full winner reason in the text widget."""
-        self.txt_winner.configure(state="normal")
-        self.txt_winner.delete("1.0", "end")
-        self.txt_winner.insert("end", reason)
-        self.txt_winner.see("end")
-        self.txt_winner.configure(state="disabled")
+        txt = self.txt_winner.text
+        txt.configure(state="normal")
+        txt.delete("1.0", "end")
+        txt.insert("end", reason)
+        txt.see("end")
+        txt.configure(state="disabled")
 
     def _on_cycle_selected(self, _event: tk.Event) -> None:
         """Show reason for the selected cycle."""
