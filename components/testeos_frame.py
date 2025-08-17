@@ -1,5 +1,6 @@
 from typing import Callable, Dict, Any
 from ttkbootstrap.constants import *
+from ttkbootstrap.scrolled import ScrolledFrame
 from tkinter import ttk
 import tkinter as tk
 
@@ -23,8 +24,8 @@ class TesteosFrame(ttk.Frame):
 
     def _build(self) -> None:
         """Construye los widgets principales."""
-        self.columnconfigure(0, weight=3)
-        self.columnconfigure(1, weight=2)
+        self.columnconfigure(0, weight=1)
+        self.columnconfigure(1, weight=0)
         self.rowconfigure(0, weight=1)
 
         self.var_num_bots = tk.IntVar(value=10)
@@ -32,8 +33,8 @@ class TesteosFrame(ttk.Frame):
         self.var_depth_speed = tk.StringVar(value="100ms")
         self.var_mode = tk.StringVar(value="SIM")
 
-        # Tabla de bots fija
-        tbl_frame = ttk.Frame(self)
+        # Tabla de bots con scroll
+        tbl_frame = ScrolledFrame(self, autohide=True)
         tbl_frame.grid(row=0, column=0, sticky="nsew")
         tbl_frame.columnconfigure(0, weight=1)
         tbl_frame.rowconfigure(0, weight=1)
@@ -52,13 +53,15 @@ class TesteosFrame(ttk.Frame):
             self.tree.heading(col, text=txt)
             self.tree.column(col, width=width, anchor="center", stretch=True)
         vsb = ttk.Scrollbar(tbl_frame, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscrollcommand=vsb.set)
+        hsb = ttk.Scrollbar(tbl_frame, orient="horizontal", command=self.tree.xview)
+        self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
         self.tree.grid(row=0, column=0, sticky="nsew")
         vsb.grid(row=0, column=1, sticky="ns")
+        hsb.grid(row=1, column=0, sticky="ew")
 
         # Panel lateral con controles e historial
         side = ttk.Frame(self, padding=(8, 0, 0, 0))
-        side.grid(row=0, column=1, sticky="nsew")
+        side.grid(row=0, column=1, sticky="ns")
         side.columnconfigure(0, weight=1)
         side.rowconfigure(3, weight=1)
 
