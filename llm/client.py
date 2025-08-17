@@ -67,9 +67,9 @@ class LLMClient:
     def check_credentials(self) -> bool:
         """Verifies that the configured API key is valid.
 
-        It performs a minimal request to the OpenAI API. Any network or
-        authentication error results in ``False`` so callers can decide how to
-        handle unavailable credentials without raising exceptions.
+        A small ``/v1/models`` request is issued. Any network or authentication
+        error yields ``False`` rather than raising, allowing callers to keep
+        UI flows responsive and display their own error messages.
         """
         if not self.api_key:
             self._client = None

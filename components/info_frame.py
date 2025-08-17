@@ -45,10 +45,12 @@ class InfoFrame(ttk.Labelframe):
         self.txt_logs = ScrolledText(self, height=6, autohide=True, wrap="word")
         self.txt_logs.grid(row=0, column=0, columnspan=2, sticky="nsew")
 
-        ttk.Button(self, text="Limpiar log", command=self.clear_logs).grid(
-            row=1, column=0, sticky="ew", pady=(4, 0)
+        ttk.Button(
+            self, text="Limpiar log", command=self.clear_logs, bootstyle=INFO
+        ).grid(row=1, column=0, sticky="ew", pady=(4, 0))
+        self.btn_pause = ttk.Button(
+            self, text="Pausar log", command=self.toggle_pause, bootstyle=INFO
         )
-        self.btn_pause = ttk.Button(self, text="Pausar log", command=self.toggle_pause)
         self.btn_pause.grid(row=1, column=1, sticky="ew", pady=(4, 0))
 
         ttk.Label(self, text="Órdenes mínimas").grid(row=2, column=0, sticky="w")
@@ -57,16 +59,20 @@ class InfoFrame(ttk.Labelframe):
             self,
             text="Aplicar mín. órdenes",
             command=on_apply_min_orders,
+            bootstyle=INFO,
         ).grid(row=3, column=0, columnspan=2, sticky="ew", pady=(4, 0))
-        ttk.Button(self, text="Revertir patch", command=on_revert_patch).grid(
-            row=4, column=0, sticky="ew", pady=(4, 0)
-        )
-        ttk.Button(self, text="Aplicar a LIVE", command=on_apply_winner_live).grid(
-            row=4, column=1, sticky="ew", pady=(4, 0)
-        )
-        ttk.Button(self, text="Crear PR patch", command=on_submit_patch).grid(
-            row=5, column=0, columnspan=2, sticky="ew", pady=(4, 0)
-        )
+        ttk.Button(
+            self, text="Revertir patch", command=on_revert_patch, bootstyle=INFO
+        ).grid(row=4, column=0, sticky="ew", pady=(4, 0))
+        ttk.Button(
+            self,
+            text="Aplicar a LIVE",
+            command=on_apply_winner_live,
+            bootstyle=INFO,
+        ).grid(row=4, column=1, sticky="ew", pady=(4, 0))
+        ttk.Button(
+            self, text="Crear PR patch", command=on_submit_patch, bootstyle=INFO
+        ).grid(row=5, column=0, columnspan=2, sticky="ew", pady=(4, 0))
 
         self.after(200, self._process_log_queue)
 

@@ -115,8 +115,10 @@ class App(tb.Window):
 
         self._supervisor.stream_events(lambda ev: self._event_queue.put(ev))
         self._load_saved_keys()
+        self.mass_state.apis_verified = {"binance": False, "llm": False}
+        self.mass_state.save()
         self.auth_frame.update_badges(self.mass_state.apis_verified)
-        self._apply_api_locks()
+        self._lock_controls(True)
         self.after(250, self._poll_event_queue)
         self.after(4000, self._tick_ui_refresh)
         self.after(3000, self._tick_open_orders)
@@ -261,7 +263,9 @@ class App(tb.Window):
             width=14,
             state="readonly",
         ).grid(row=0, column=1, sticky="ew")
-        btn_apply_llm = ttk.Button(frm_llm, text="Aplicar LLM", command=self._apply_llm)
+        btn_apply_llm = ttk.Button(
+            frm_llm, text="Aplicar LLM", command=self._apply_llm, bootstyle=INFO
+        )
         btn_apply_llm.grid(row=0, column=2, padx=6)
 
         # Consulta LLM
@@ -270,7 +274,9 @@ class App(tb.Window):
         frm_llm_manual.columnconfigure(0, weight=1)
         self.var_llm_query = tb.StringVar()
         ttk.Entry(frm_llm_manual, textvariable=self.var_llm_query).grid(row=0, column=0, sticky="ew")
-        ttk.Button(frm_llm_manual, text="Enviar", command=self._send_llm_query).grid(row=0, column=1, padx=4)
+        ttk.Button(
+            frm_llm_manual, text="Enviar", command=self._send_llm_query, bootstyle=INFO
+        ).grid(row=0, column=1, padx=4)
         frm_llm_manual.rowconfigure(1, weight=1)
         self.txt_llm_resp = ScrolledText(frm_llm_manual, height=3, autohide=True, wrap="word")
         self.txt_llm_resp.grid(row=1, column=0, columnspan=2, sticky="nsew")
@@ -368,7 +374,17 @@ class App(tb.Window):
         }
         self.mass_state.save()
         self.after(0, lambda: self.auth_frame.update_badges(self.mass_state.apis_verified))
-        self.after(0, lambda: self.log_append("[API] Verificación completada"))
+        def _log_result() -> None:
+            if bin_ok and llm_ok:
+                self.log_append("[API] Verificación exitosa")
+            else:
+                missing: List[str] = []
+                if not bin_ok:
+                    missing.append("Binance")
+                if not llm_ok:
+                    missing.append("LLM")
+                self.log_append(f"[API] Error en {' y '.join(missing)}")
+        self.after(0, _log_result)
         self.after(0, self._apply_api_locks)
 
     def _apply_api_locks(self) -> None:
@@ -383,6 +399,13 @@ class App(tb.Window):
 
     def _on_bot_sim(self, *_):
         if self.var_bot_sim.get():
+            if not (
+                self.mass_state.apis_verified.get("binance")
+                and self.mass_state.apis_verified.get("llm")
+            ):
+                self.log_append("[SIM] APIs no verificadas")
+                self.var_bot_sim.set(False)
+                return
             if not self._engine_sim or not self._engine_sim.is_alive():
                 self._ensure_exchange()
                 self._engine_sim = Engine(self._on_engine_snapshot, self.log_append, exchange=self.exchange, name="SIM")
@@ -396,6 +419,13 @@ class App(tb.Window):
 
     def _on_bot_live(self, *_):
         if self.var_bot_live.get():
+            if not (
+                self.mass_state.apis_verified.get("binance")
+                and self.mass_state.apis_verified.get("llm")
+            ):
+                self.log_append("[LIVE] APIs no verificadas")
+                self.var_bot_live.set(False)
+                return
             if not self._engine_live or not self._engine_live.is_alive():
                 self._ensure_exchange()
                 self._engine_live = Engine(self._on_engine_snapshot, self.log_append, exchange=self.exchange, name="LIVE")

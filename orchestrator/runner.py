@@ -12,6 +12,7 @@ from engine.strategy_base import StrategyBase
 from engine.strategy_params import Params, map_mutations_to_params
 from engine.ob_utils import estimate_fill_time
 from exchange_utils.orderbook_service import MarketDataHub, market_data_hub
+from data_logger import log_event
 
 
 class BotRunner:
@@ -84,8 +85,36 @@ class BotRunner:
                 amount = buy_data["amount"]
                 tick = buy_data["tick_size"]
                 buy_price = buy_data["price"]
+
+                # Estimate fill time before placing the buy order
+                book_full = self.hub.get_order_book(sym, top=100)
+                trade_rate = self.hub.get_trade_rate(sym, buy_price, "buy")
+                est = (
+                    estimate_fill_time(book_full, "buy", buy_price, amount, trade_rate)
+                    if book_full
+                    else None
+                )
+                if not est or est[1] > params.max_wait_s:
+                    continue
+                queue_qty, t_est = est
+                buy_metrics = {
+                    "expected_fill_time_s": t_est,
+                    "queue_ahead_qty": queue_qty,
+                    "trade_rate_qty_per_s": trade_rate,
+                }
+
+                # Log pair selection after preliminary checks pass
+                log_event(
+                    {
+                        "event": "pair_selected",
+                        "bot_id": self.config.id,
+                        "cycle_id": self.config.cycle,
+                        "symbol": sym,
+                        "data": buy_data,
+                    }
+                )
+
                 buy_vwap = None
-                buy_metrics = None
 
                 if self.mode == "LIVE":
                     from engine.trade_live import (
@@ -95,6 +124,7 @@ class BotRunner:
                     )
 
                     try:
+                        t0 = time.time()
                         order = await asyncio.to_thread(
                             place_limit, self.exchange, sym, "buy", buy_price, amount
                         )
@@ -106,6 +136,7 @@ class BotRunner:
                             oid,
                             params.max_wait_s,
                         )
+                        buy_metrics["actual_fill_time_s"] = time.time() - t0
                     except Exception:
                         if "oid" in locals():
                             try:
@@ -123,33 +154,47 @@ class BotRunner:
                         continue
                     buy_price = float(order.get("price", buy_price))
                 else:
-                    book = self.hub.get_order_book(sym, top=100)
-                    trade_rate = self.hub.get_trade_rate(sym, buy_price, "buy")
-                    est = (
-                        estimate_fill_time(book, "buy", buy_price, amount, trade_rate)
-                        if book
-                        else None
-                    )
-                    if not est or est[1] > params.max_wait_s:
-                        continue
-                    queue_qty, t_est = est
                     buy_vwap = buy_price
-                    buy_metrics = {
-                        "expected_fill_time_s": t_est,
-                        "actual_fill_time_s": t_est,
-                        "queue_ahead_qty": queue_qty,
-                        "trade_rate_qty_per_s": trade_rate,
+                    buy_metrics["actual_fill_time_s"] = t_est
+
+                log_event(
+                    {
+                        "event": "buy_order",
+                        "bot_id": self.config.id,
+                        "cycle_id": self.config.cycle,
+                        "symbol": sym,
+                        "price": buy_price,
+                        "qty": amount,
+                        "metrics": buy_metrics,
                     }
+                )
 
                 sell_order = self.strategy.build_sell_order(
                     params, {**buy_data, "price": buy_price}, mode=self.mode
                 )
                 sell_price = sell_order["price"]
+
+                # Estimate fill time for the sell order
+                book2 = self.hub.get_order_book(sym, top=100)
+                trade_rate2 = self.hub.get_trade_rate(sym, sell_price, "sell")
+                est2 = (
+                    estimate_fill_time(book2, "sell", sell_price, amount, trade_rate2)
+                    if book2
+                    else None
+                )
+                if not est2 or est2[1] > params.max_wait_s:
+                    continue
+                queue_qty2, t_est2 = est2
+                sell_metrics = {
+                    "expected_fill_time_s": t_est2,
+                    "queue_ahead_qty": queue_qty2,
+                    "trade_rate_qty_per_s": trade_rate2,
+                }
                 sell_vwap = None
-                sell_metrics = None
 
                 if self.mode == "LIVE":
                     try:
+                        t1 = time.time()
                         sorder = await asyncio.to_thread(
                             place_limit, self.exchange, sym, "sell", sell_price, amount
                         )
@@ -161,6 +206,7 @@ class BotRunner:
                             soid,
                             params.max_wait_s,
                         )
+                        sell_metrics["actual_fill_time_s"] = time.time() - t1
                     except Exception:
                         if "soid" in locals():
                             try:
@@ -182,23 +228,20 @@ class BotRunner:
                         continue
                     sell_price = float(sorder.get("price", sell_price))
                 else:
-                    book2 = self.hub.get_order_book(sym, top=100)
-                    trade_rate2 = self.hub.get_trade_rate(sym, sell_price, "sell")
-                    est2 = (
-                        estimate_fill_time(book2, "sell", sell_price, amount, trade_rate2)
-                        if book2
-                        else None
-                    )
-                    if not est2 or est2[1] > params.max_wait_s:
-                        continue
-                    queue_qty2, t_est2 = est2
                     sell_vwap = sell_price
-                    sell_metrics = {
-                        "expected_fill_time_s": t_est2,
-                        "actual_fill_time_s": t_est2,
-                        "queue_ahead_qty": queue_qty2,
-                        "trade_rate_qty_per_s": trade_rate2,
+                    sell_metrics["actual_fill_time_s"] = t_est2
+
+                log_event(
+                    {
+                        "event": "sell_order",
+                        "bot_id": self.config.id,
+                        "cycle_id": self.config.cycle,
+                        "symbol": sym,
+                        "price": sell_price,
+                        "qty": amount,
+                        "metrics": sell_metrics,
                     }
+                )
 
                 hold_time = (buy_metrics or {}).get("actual_fill_time_s", 0.0) + (
                     sell_metrics or {}
@@ -289,6 +332,16 @@ class BotRunner:
 
                 self.storage.save_order(buy_record)
                 self.storage.save_order(sell_record)
+                log_event(
+                    {
+                        "event": "order_complete",
+                        "bot_id": self.config.id,
+                        "cycle_id": self.config.cycle,
+                        "symbol": sym,
+                        "profit": profit,
+                        "hold_time_s": hold_time,
+                    }
+                )
                 self.ui_callback(
                     {
                         "bot_id": self.config.id,

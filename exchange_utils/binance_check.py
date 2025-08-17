@@ -8,9 +8,10 @@ from urllib.parse import urlencode
 def verify(api_key: str, api_secret: str, timeout: float = 5.0) -> bool:
     """Return True if Binance API keys are valid.
 
-    Performs a signed request to ``/api/v3/account``. Any network or
-    authentication error results in ``False``. The call uses a short timeout
-    so UI callers do not block for long periods.
+    A lightweight ``/api/v3/account`` request is performed to ensure both the
+    key and secret are correct. Any network or authentication error results in
+    ``False`` so callers can safely gate UI elements based on the result.
+    The call uses a short timeout so interactive flows remain responsive.
     """
     if not api_key or not api_secret:
         return False
