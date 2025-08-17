@@ -2,11 +2,11 @@ import threading, queue, time, json, os, copy, asyncio
 import ttkbootstrap as tb
 from ttkbootstrap.constants import *
 from ttkbootstrap.scrolled import ScrolledText
-from tkinter import ttk
+from tkinter import ttk, messagebox
 from typing import Dict, Any, List
 
 from config import UIColors, Defaults, AppState as CoreAppState
-from engine import Engine, load_sim_config
+from engine import Engine, load_sim_config, create_engine
 from llm_client import LLMClient as EngineLLMClient
 from llm import LLMClient as MassLLMClient
 from components.testeos_frame import TesteosFrame
@@ -151,6 +151,15 @@ class App(tb.Window):
         ttk.Checkbutton(header, text="BOT SIM", variable=self.var_bot_sim, style="success.Roundtoggle").grid(row=0, column=0, sticky="w", padx=5)
         ttk.Checkbutton(header, text="BOT LIVE", variable=self.var_bot_live, style="warning.Roundtoggle").grid(row=0, column=1, sticky="w", padx=5)
         ttk.Checkbutton(header, text="Confirm LIVE", variable=self.var_live_confirm, style="danger.Roundtoggle").grid(row=0, column=2, sticky="w", padx=5)
+
+        self.btn_review = ttk.Button(
+            header,
+            text="Revisar y promover",
+            bootstyle=INFO,
+            command=self._on_review_promote,
+        )
+        self.btn_review.grid(row=0, column=3, sticky="e")
+        self.btn_review.grid_remove()
 
         self.lbl_state_sim = ttk.Label(header, text="SIM: OFF", bootstyle=SECONDARY)
         self.lbl_state_live = ttk.Label(header, text="LIVE: OFF", bootstyle=SECONDARY)
@@ -587,6 +596,48 @@ class App(tb.Window):
             self.log_append("[TEST] Testeos detenidos")
             self._supervisor.stop_mass_tests()
 
+    def _on_review_promote(self) -> None:
+        if not self._winner_cfg:
+            self.log_append("[PROMOTE] No hay configuración ganadora")
+            return
+        try:
+            if self._engine_sim and self._engine_sim.is_alive():
+                self._engine_sim.stop()
+            self._engine_sim = load_sim_config(self._winner_cfg.mutations)
+            self._engine_sim.set_order_hook(self._log_order)
+            self._engine_sim.start()
+            self.var_bot_sim.set(True)
+            self.lbl_state_sim.configure(text="SIM: ON", bootstyle=SUCCESS)
+            self.log_append("[PROMOTE] Bot cargado en SIM para revisión")
+        except Exception as exc:
+            self.log_append(f"[PROMOTE] Error al iniciar SIM: {exc}")
+            return
+        if not messagebox.askyesno("Promover", "¿Promover este bot a LIVE?"):
+            return
+        try:
+            if self._engine_live and self._engine_live.is_alive():
+                self._engine_live.stop()
+            self._ensure_exchange()
+            self._engine_live = create_engine(
+                exchange=self.exchange,
+                mutations=self._winner_cfg.mutations,
+                on_order=self._log_order,
+            )
+            self._engine_live.mode = "LIVE"
+            self._engine_live.start()
+            self.var_bot_live.set(True)
+            self.lbl_state_live.configure(text="LIVE: ON", bootstyle=SUCCESS)
+            self.log_append("[PROMOTE] Configuración promovida a LIVE")
+        except Exception as exc:
+            self.log_append(f"[PROMOTE] Error al iniciar LIVE: {exc}")
+            return
+        finally:
+            if self._engine_sim and self._engine_sim.is_alive():
+                self._engine_sim.stop()
+            self.var_bot_sim.set(False)
+            self.lbl_state_sim.configure(text="SIM: OFF", bootstyle=SECONDARY)
+        self.btn_review.grid_remove()
+
     def on_load_winner_for_sim(self) -> None:
         """Selecciona meta-ganador histórico y lo carga en el bot SIM."""
         try:
@@ -632,6 +683,14 @@ class App(tb.Window):
             self.log_append(f"[TEST] Error al cargar meta-ganador: {exc}")
 
     # ------------------- Log helpers -------------------
+    def _log_order(self, order: Dict[str, Any]) -> None:
+        sym = order.get("symbol")
+        side = order.get("side")
+        price = order.get("price")
+        qty = order.get("qty_usd") or order.get("qty")
+        mode = order.get("mode", "")
+        self.log_append(f"[ORDER {mode}] {side} {sym} {qty} @ {price}")
+
     def log_append(self, msg: str):
         if msg.startswith("[LLM]"):
             self.info_frame.append_llm_log("info", msg[5:].strip())
@@ -656,6 +715,7 @@ class App(tb.Window):
                 ev = self._event_queue.get_nowait()
                 if ev.message == "cycle_start":
                     self.testeos_frame.clear()
+                    self.btn_review.grid_remove()
                 elif ev.message == "bot_start":
                     self.testeos_frame.update_bot_row(
                         {
@@ -690,6 +750,7 @@ class App(tb.Window):
                             "bot_id": wid,
                             "reason": reason,
                         })
+                        self.btn_review.grid()
                 elif ev.message == "cycle_finished" and ev.payload:
                     info = ev.payload
                     info["cycle"] = ev.cycle

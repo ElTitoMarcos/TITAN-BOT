@@ -78,6 +78,7 @@ class Supervisor:
         self._global_thread: Optional[threading.Thread] = None
         self._global_stop: Optional[threading.Event] = None
         self._global_interval_s: int = 6 * 3600
+        self.status: str = "idle"
 
     # ------------------------------------------------------------------
     # Streaming de eventos
@@ -164,6 +165,7 @@ class Supervisor:
         else:
             self.hub._sub_mgr.max_depth = self.state.max_depth_symbols
         self.mass_tests_enabled = True
+        self.status = "testing"
         # Generación inicial vacía -> se creará en el primer ciclo
         self._current_generation = []
         self._thread = threading.Thread(target=self._loop, daemon=True)
@@ -182,6 +184,7 @@ class Supervisor:
             except Exception:
                 pass
             self.hub = None
+        self.status = "idle"
 
     # ------------------------------------------------------------------
     # Global analysis scheduler
@@ -321,10 +324,17 @@ class Supervisor:
                 },
 
             )
-            self.spawn_next_generation_from_winner(winner_cfg)
+            self.state.winner_config = {
+                "id": winner_cfg.id,
+                "name": winner_cfg.name,
+                "mutations": winner_cfg.mutations,
+            }
             self.state.current_cycle = cycle
             self.state.next_bot_id = self._next_bot_id
             self.state.save()
+            self.status = "awaiting_review"
+            self.mass_tests_enabled = False
+            break
         self.mass_tests_enabled = False
 
     # ------------------------------------------------------------------
