@@ -48,6 +48,7 @@ class LLMClient:
         """
         if not self.api_key:
             self._client = None
+            
             return False
         try:
             import requests
@@ -63,6 +64,7 @@ class LLMClient:
             return False
         except Exception:
             self._client = None
+
             return False
 
     # ------------------------------------------------------------------

@@ -246,6 +246,7 @@ class Supervisor:
         for sym in self._last_symbols - set(symbols):
             self.hub.unsubscribe_depth(sym)
         self._last_symbols = set(symbols)
+
         # Generar bots si es la primera vez
         if not self._current_generation:
             variations: List[Dict[str, object]] = []
