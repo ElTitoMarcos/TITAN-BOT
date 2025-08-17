@@ -123,9 +123,67 @@ def book_hash(book: Dict[str, List[Tuple[float, float]]], depth: int = 5) -> str
     return sha256(payload.encode()).hexdigest()
 
 
+def queue_ahead_qty(
+    book: Dict[str, List[Tuple[float, float]]],
+    side: str,
+    price: float,
+    qty: float,
+) -> float:
+    """Quantity ahead of an order at ``price`` including our own ``qty``."""
+
+    levels = _get_levels(book, "bids" if side == "buy" else "asks")
+    total = 0.0
+    for p, q in levels:
+        if side == "buy":
+            if p > price:
+                total += q
+            elif p == price:
+                total += q
+        else:
+            if p < price:
+                total += q
+            elif p == price:
+                total += q
+    return total + qty
+
+
+def estimate_fill_time(
+    book: Dict[str, List[Tuple[float, float]]],
+    side: str,
+    price: float,
+    qty: float,
+    trade_rate_qty_per_s: Optional[float],
+) -> Optional[Tuple[float, float]]:
+    """Return queue quantity and expected fill time for a limit order.
+
+    Parameters
+    ----------
+    book:
+        Order book snapshot.
+    side:
+        ``"buy"`` or ``"sell"``.
+    price, qty:
+        Order parameters.
+    trade_rate_qty_per_s:
+        Quantity traded per second at ``price`` or better.
+
+    Returns
+    -------
+    (queue_qty, t_est) or ``None`` if no fill should be expected.
+    """
+
+    queue_qty = queue_ahead_qty(book, side, price, qty)
+    if trade_rate_qty_per_s is None or trade_rate_qty_per_s <= 0:
+        return None
+    t_est = queue_qty / trade_rate_qty_per_s if trade_rate_qty_per_s else None
+    return queue_qty, t_est
+
+
 __all__ = [
     "try_fill_limit",
     "compute_imbalance",
     "compute_spread_ticks",
     "book_hash",
+    "queue_ahead_qty",
+    "estimate_fill_time",
 ]
