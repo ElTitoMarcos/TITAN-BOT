@@ -115,8 +115,14 @@ class App(tb.Window):
 
         self._supervisor.stream_events(lambda ev: self._event_queue.put(ev))
         self._load_saved_keys()
+        if not (self.var_bin_key.get() and self.var_bin_sec.get()):
+            self.mass_state.apis_verified["binance"] = False
+        if not self.var_oai_key.get():
+            self.mass_state.apis_verified["llm"] = False
+        self.mass_state.save()
         self.auth_frame.update_badges(self.mass_state.apis_verified)
-        self._apply_api_locks()
+        self._lock_controls(True)
+        self.after(0, self._apply_api_locks)
         self.after(250, self._poll_event_queue)
         self.after(4000, self._tick_ui_refresh)
         self.after(3000, self._tick_open_orders)
