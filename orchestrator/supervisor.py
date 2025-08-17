@@ -234,15 +234,13 @@ class Supervisor:
         while self.mass_tests_enabled:
             cycle = self.state.current_cycle + 1
             asyncio.run(self.run_cycle(cycle))
-            stats = self.gather_results(cycle)
-            if not stats:
+            cycle_summary = self.build_llm_cycle_summary(cycle)
+            if not cycle_summary.get("bots"):
                 self._emit("ERROR", "cycle", cycle, None, "no_stats", {})
                 self.state.current_cycle = cycle
                 self.state.next_bot_id = self._next_bot_id
                 self.state.save()
                 continue
-
-            cycle_summary = self._compose_cycle_summary(cycle, stats)
             self._emit(
                 "INFO", "llm", cycle, None, "llm_request", {"summary": cycle_summary}
             )
@@ -283,7 +281,7 @@ class Supervisor:
                     self.state.next_bot_id = self._next_bot_id
                     self.state.save()
                     continue
-            total_pnl = sum(s.pnl for s in stats)
+            total_pnl = sum(b["stats"]["pnl"] for b in cycle_summary["bots"])
             cycle_summary["winner_bot_id"] = winner_id
             cycle_summary["winner_reason"] = winner_reason
 
@@ -446,41 +444,16 @@ class Supervisor:
         """Obtiene las estadísticas de un ciclo."""
         return [s for s in self.storage.iter_stats() if s.cycle == cycle]
 
-    def _compose_cycle_summary(self, cycle: int, stats: List[BotStats]) -> Dict[str, object]:
-        """Construye el payload que se envía al LLM para análisis."""
+    def build_llm_cycle_summary(self, cycle: int) -> Dict[str, Any]:
+        """Wrapper that enriches storage summary with global parameters."""
 
-        summary: Dict[str, object] = {"cycle": cycle, "bots": []}
-        for s in stats:
-            cfg = self.storage.get_bot(s.bot_id)
-            orders = self.storage.iter_orders(cycle, s.bot_id)
-            pairs: Dict[str, float] = {}
-            for o in orders:
-                sym = o.get("symbol")
-                pnl = float(o.get("pnl") or 0)
-                if sym:
-                    pairs[sym] = pairs.get(sym, 0.0) + pnl
-            top3 = [
-                {"symbol": sym, "pnl": pnl}
-                for sym, pnl in sorted(pairs.items(), key=lambda x: x[1], reverse=True)[:3]
-            ]
-            summary["bots"].append(
-                {
-                    "bot_id": s.bot_id,
-                    "mutations": cfg.mutations if cfg else {},
-                    "stats": {
-                        "orders": s.orders,
-                        "pnl": s.pnl,
-                        "pnl_pct": s.pnl_pct,
-                        "win_rate": s.wins / s.orders if s.orders else 0.0,
-                        "avg_hold_s": 0.0,
-                        "avg_slippage_ticks": 0.0,
-                        "timeouts": 0,
-                        "cancel_replace_count": 0,
-                    },
-                    "top3_pairs": top3,
-                    "hourly_dist": {},
-                }
-            )
+        summary = self.storage.build_llm_cycle_summary(cycle)
+        summary["global_params"] = {"order_size_usd": self._order_size_usd}
+        if summary.get("bots"):
+            muts = summary["bots"][0].get("mutations", {})
+            buf = muts.get("commission_buffer_ticks")
+            if buf is not None:
+                summary["global_params"]["commission_buffer_ticks"] = buf
         return summary
 
     def _prepare_candidate_symbols(self) -> List[str]:

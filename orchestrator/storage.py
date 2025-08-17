@@ -412,6 +412,116 @@ class SQLiteStorage:
         return winners
 
     # ------------------------------------------------------------------
+    def build_llm_cycle_summary(self, cycle_id: int) -> Dict[str, Any]:
+        """Compile per-cycle data in a compact structure for the LLM."""
+
+        summary: Dict[str, Any] = {
+            "cycle": cycle_id,
+            "period": {},
+            "symbols_evaluated": 0,
+            "bots": [],
+        }
+
+        # period info -----------------------------------------------------
+        cycle_meta = self.get_cycle_summary(cycle_id)
+        if cycle_meta:
+            summary["period"] = {
+                "started_at": cycle_meta.get("started_at"),
+                "finished_at": cycle_meta.get("finished_at"),
+            }
+
+        # gather orders and stats -----------------------------------------
+        orders = self.iter_orders(cycle_id)
+        stats_list = [s for s in self.iter_stats() if s.cycle == cycle_id]
+        events = self.get_events(cycle_id)
+
+        symbols = {o.get("symbol") for o in orders if o.get("symbol")}
+        summary["symbols_evaluated"] = len(symbols)
+
+        for s in stats_list:
+            cfg = self.get_bot(s.bot_id)
+            bot_orders = [o for o in orders if o.get("bot_id") == s.bot_id]
+            pairs: Dict[str, float] = {}
+            holds: List[float] = []
+            slippages: List[float] = []
+            timeouts = 0
+            crc_total = 0
+            samples: Dict[str, Any] = {}
+
+            for o in bot_orders:
+                sym = o.get("symbol")
+                pnl = float(o.get("pnl") or 0.0)
+                if sym:
+                    pairs[sym] = pairs.get(sym, 0.0) + pnl
+                crc_total += int(o.get("cancel_replace_count") or 0)
+                if o.get("hold_time_s") is not None:
+                    holds.append(float(o.get("hold_time_s")))
+                raw: Dict[str, Any] = {}
+                try:
+                    raw = json.loads(o.get("raw_json") or "{}")
+                except Exception:
+                    raw = {}
+                slip = raw.get("slippage_ticks")
+                if slip is not None:
+                    try:
+                        slippages.append(float(slip))
+                    except Exception:
+                        pass
+                reason_codes = raw.get("reason_codes") or []
+                if any("timeout" in str(rc).lower() for rc in reason_codes):
+                    timeouts += 1
+                phase = "buy" if o.get("side") == "buy" else "sell"
+                if phase not in samples and raw:
+                    keys = [
+                        "phase_timestamps",
+                        "expected_fill_time_s",
+                        "actual_fill_time_s",
+                        "queue_ahead_qty",
+                        "trade_rate_qty_per_s",
+                        "slippage_ticks",
+                        "cancel_replace_count",
+                        "reason_codes",
+                        "monitor_events",
+                        "commission_paid",
+                        "commission_asset",
+                    ]
+                    samples[phase] = {k: raw[k] for k in keys if k in raw}
+
+            avg_hold = sum(holds) / len(holds) if holds else 0.0
+            avg_slip = sum(slippages) / len(slippages) if slippages else 0.0
+            top3 = [
+                {"symbol": sym, "pnl": pnl}
+                for sym, pnl in sorted(pairs.items(), key=lambda x: x[1], reverse=True)[:3]
+            ]
+            timeline = [
+                {"ts": ev.ts.isoformat(), "message": ev.message}
+                for ev in events
+                if ev.bot_id == s.bot_id
+            ]
+
+            summary["bots"].append(
+                {
+                    "bot_id": s.bot_id,
+                    "mutations": cfg.mutations if cfg else {},
+                    "stats": {
+                        "orders": s.orders,
+                        "pnl": s.pnl,
+                        "pnl_pct": s.pnl_pct,
+                        "win_rate": s.wins / s.orders if s.orders else 0.0,
+                        "avg_hold_s": avg_hold,
+                        "avg_slippage_ticks": avg_slip,
+                        "timeouts": timeouts,
+                        "cancel_replace_count": crc_total,
+                    },
+                    "top3_pairs": top3,
+                    "timeline": timeline,
+                    "raw_samples": samples,
+                }
+            )
+
+        return summary
+
+    # ------------------------------------------------------------------
     def gather_global_summary(self) -> Dict[str, Any]:
         """Aggregate basic metrics across all stored data.
 
