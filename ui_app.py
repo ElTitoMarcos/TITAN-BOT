@@ -12,7 +12,6 @@ from llm import LLMClient as MassLLMClient
 from components.testeos_frame import TesteosFrame
 from state.app_state import AppState as MassTestState
 from orchestrator.supervisor import Supervisor
-from exchange_utils.orderbook_service import market_data_hub
 
 BADGE_SIM = "🔧SIM"
 BADGE_LIVE = "⚡LIVE"
@@ -479,11 +478,18 @@ class App(tb.Window):
             self.log_append("[TEST] Valor inválido para órdenes mínimas")
 
     # ------------------- Testeos masivos -------------------
-    def on_toggle_mass_tests(self, running: bool) -> None:
+    def on_toggle_mass_tests(self, running: bool, params: Dict[str, Any]) -> None:
         """Inicia o detiene los ciclos de testeos masivos."""
         if running:
             self.log_append("[TEST] Iniciar Testeos presionado")
-            self._supervisor.start_mass_tests()
+            st = self._supervisor.state
+            st.max_depth_symbols = int(params.get("max_depth_symbols", st.max_depth_symbols))
+            st.depth_speed = params.get("depth_speed", st.depth_speed)
+            st.bots_per_cycle = int(params.get("num_bots", st.bots_per_cycle))
+            st.mode = params.get("mode", st.mode)
+            st.save()
+            self._supervisor.mode = st.mode
+            self._supervisor.start_mass_tests(num_bots=st.bots_per_cycle)
         else:
             self.log_append("[TEST] Testeos detenidos")
             self._supervisor.stop_mass_tests()
