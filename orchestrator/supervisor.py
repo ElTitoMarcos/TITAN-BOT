@@ -17,14 +17,6 @@ from .models import BotConfig, BotStats, SupervisorEvent
 from .storage import SQLiteStorage
 from state.app_state import AppState
 
-
-from .models import BotConfig, BotStats, SupervisorEvent
-from .storage import SQLiteStorage
-from state.app_state import AppState
-from .models import BotConfig, BotStats, SupervisorEvent
-from .storage import SQLiteStorage
-from state.app_state import AppState
-
 class Supervisor:
     """Orquesta ciclos de bots ejecutados en paralelo."""
 
@@ -32,9 +24,23 @@ class Supervisor:
         self,
         storage: Optional[SQLiteStorage] = None,
         app_state: Optional[AppState] = None,
+        llm_client: Optional[LLMClient] = None,
     ) -> None:
+        """Crea el supervisor.
+
+        Parameters
+        ----------
+        storage:
+            Manejador de persistencia. Si no se provee se crea uno nuevo.
+        app_state:
+            Estado global persistido entre ejecuciones.
+        llm_client:
+            Cliente LLM utilizado para prompts de generación y evaluación.
+        """
+
         self.storage = storage or SQLiteStorage()
         self.state = app_state or AppState.load()
+        self.llm = llm_client or LLMClient()
         self._callbacks: List[Callable[[SupervisorEvent], None]] = []
         self.mass_tests_enabled = False
         self._thread: Optional[threading.Thread] = None
@@ -91,20 +97,28 @@ class Supervisor:
 
     # ------------------------------------------------------------------
     def _loop(self) -> None:
+        """Bucle principal ejecutado en un hilo aparte."""
+
         while self.mass_tests_enabled:
             cycle = self.state.current_cycle + 1
             asyncio.run(self.run_cycle(cycle))
             stats = self.gather_results(cycle)
             cycle_summary = self._compose_cycle_summary(cycle, stats)
-            client = LLMClient()
+            self._emit(
+                "INFO", "llm", cycle, None, "llm_request", {"summary": cycle_summary}
+            )
             try:
-                decision = client.analyze_cycle_and_pick_winner(cycle_summary)
+                decision = self.llm.analyze_cycle_and_pick_winner(cycle_summary)
+                self._emit("INFO", "llm", cycle, None, "llm_response", decision)
                 winner_id = int(decision.get("winner_bot_id", -1))
                 winner_reason = str(decision.get("reason", ""))
                 winner_cfg = self.storage.get_bot(winner_id)
                 if winner_cfg is None:
                     raise ValueError("winner cfg not found")
-            except Exception:
+            except Exception as exc:
+                self._emit(
+                    "ERROR", "llm", cycle, None, "llm_error", {"error": str(exc)}
+                )
                 winner_id, winner_cfg = self.pick_winner(cycle)
                 winner_reason = "max_pnl"
             total_pnl = sum(s.pnl for s in stats)
@@ -158,10 +172,9 @@ class Supervisor:
         # Generar bots si es la primera vez
         if not self._current_generation:
             variations: List[Dict[str, object]] = []
-            client = LLMClient()
             if cycle == 1:
                 try:
-                    variations = client.generate_initial_variations("")
+                    variations = self.llm.generate_initial_variations("")
                 except Exception:
                     variations = []
             else:
@@ -171,7 +184,9 @@ class Supervisor:
                     winner_cfg = self.storage.get_bot(prev_winner_id) if prev_winner_id else None
                     history = [self._fingerprint(b.mutations) for b in self.storage.iter_bots()]
                     if winner_cfg:
-                        variations = client.new_generation_from_winner(winner_cfg.mutations, history)
+                        variations = self.llm.new_generation_from_winner(
+                            winner_cfg.mutations, history
+                        )
                 except Exception:
                     variations = []
 
@@ -197,20 +212,36 @@ class Supervisor:
         self._emit("INFO", "cycle", cycle, None, "cycle_start", {})
 
         async def simulate_bot(cfg: BotConfig) -> None:
+            """Simula un bot de manera asíncrona emitiendo progreso."""
+
             self._emit("INFO", "bot", cycle, cfg.id, "bot_start", {})
             start = time.time()
-            await asyncio.sleep(random.uniform(0.5, 1.5))
-            orders = random.randint(10, 100)
-            pnl = random.uniform(-10.0, 10.0)
+            target_orders = random.randint(10, 100)
+            total_pnl = random.uniform(-10.0, 10.0)
+            steps = max(1, target_orders // 10)
+            for step in range(steps):
+                if not self.mass_tests_enabled:
+                    return
+                await asyncio.sleep(random.uniform(0.2, 0.5))
+                partial_orders = int(target_orders * (step + 1) / steps)
+                partial_pnl = total_pnl * ((step + 1) / steps)
+                self._emit(
+                    "INFO",
+                    "bot",
+                    cycle,
+                    cfg.id,
+                    "bot_progress",
+                    {"orders": partial_orders, "pnl": partial_pnl},
+                )
             pnl_pct = random.uniform(-5.0, 5.0)
             runtime_s = int(time.time() - start)
-            wins = random.randint(0, orders)
-            losses = orders - wins
+            wins = random.randint(0, target_orders)
+            losses = target_orders - wins
             stats = BotStats(
                 bot_id=cfg.id,
                 cycle=cycle,
-                orders=orders,
-                pnl=pnl,
+                orders=target_orders,
+                pnl=total_pnl,
                 pnl_pct=pnl_pct,
                 runtime_s=runtime_s,
                 wins=wins,
@@ -285,7 +316,7 @@ class Supervisor:
         """Genera nuevas configuraciones basadas en el ganador previo."""
 
         next_cycle = winner_config.cycle + 1
-        client = LLMClient()
+        client = self.llm
         # fingerprints históricos para evitar duplicados
         history = [self._fingerprint(b.mutations) for b in self.storage.iter_bots()]
         try:

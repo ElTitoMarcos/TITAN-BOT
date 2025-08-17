@@ -92,7 +92,12 @@ class TesteosFrame(ttk.Frame):
             self.tree.delete(item)
 
     def update_bot_row(self, stats: Dict[str, Any]) -> None:
-        """Inserta o actualiza una fila con estadísticas de un bot."""
+        """Inserta o actualiza una fila con estadísticas de un bot.
+
+        Puede llamarse varias veces mientras el bot está en ejecución para
+        reflejar su progreso (órdenes y PnL) o una vez finalizado con los
+        valores definitivos.
+        """
         bot_id = int(stats.get("bot_id"))
         cycle = stats.get("cycle", "")
         orders = stats.get("orders", 0)

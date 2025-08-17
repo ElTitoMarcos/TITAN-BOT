@@ -1,5 +1,13 @@
 """Prompts estáticos usados por el cliente LLM."""
 
+# Cabecera global que se antepone a todos los prompts enviados al LLM.
+PROMPT_P0 = (
+    "Proyecto TITAN-BOT. Módulo 'Testeos Masivos' con 10 bots concurrentes. "
+    "Usa datos de mercado en tiempo real (snapshot REST + diffs WS), simula fills "
+    "contra el order book, respeta rate limits y muestra logs del LLM en la UI. "
+    "Código claro, modular, testeable y con manejo de errores."
+)
+
 PROMPT_INICIAL_VARIACIONES = """
 SISTEMA: Eres experto en microestructura y market-making spot en Binance (pares XXXBTC). Tarea: generar 10 variaciones de una estrategia base que compra en nivel con acumulación de bids y vende +1 tick, con filtros: beneficio > comisiones (compra+venta), volumen ≥ 5 BTC/24h y monitoreo del libro para mover/cancelar órdenes ante cambios.
 REQUISITOS:
