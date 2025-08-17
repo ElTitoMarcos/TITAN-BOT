@@ -8,7 +8,6 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 from .strategy_params import Params
 from .ob_utils import book_hash, compute_imbalance, compute_spread_ticks
 
-
 class StrategyBase:
     """Execute the base BTC strategy under mutable parameters."""
 
@@ -95,4 +94,3 @@ class StrategyBase:
         tick = buy_order.get("tick_size", 0.0)
         price = buy_order["price"] + tick * params.sell_k_ticks
         return {"symbol": buy_order["symbol"], "price": price, "amount": buy_order["amount"], "tick_size": tick}
-
