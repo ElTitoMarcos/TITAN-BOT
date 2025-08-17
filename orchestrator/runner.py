@@ -162,6 +162,13 @@ class BotRunner:
                     round((buy_vwap - buy_price) / tick)
                 )
 
+                buy_metrics["slippage_ticks"] = int(
+                    round((buy_vwap - buy_price) / tick)
+                ) if buy_vwap is not None else None
+                buy_metrics["monitor_events"] = []
+                buy_metrics["commission_paid"] = None
+                buy_metrics["commission_asset"] = None
+
                 log_event(
                     {
                         "event": "buy_order",
@@ -248,6 +255,13 @@ class BotRunner:
                 sell_metrics["slippage_ticks"] = int(
                     round((sell_vwap - sell_price) / tick)
                 )
+
+                sell_metrics["slippage_ticks"] = int(
+                    round((sell_vwap - sell_price) / tick)
+                ) if sell_vwap is not None else None
+                sell_metrics["monitor_events"] = []
+                sell_metrics["commission_paid"] = None
+                sell_metrics["commission_asset"] = None
 
                 log_event(
                     {

@@ -17,6 +17,7 @@ from .ob_utils import (
     estimate_fill_time,
     best_price,
 )
+
 from exchange_utils.exchange_meta import exchange_meta
 from exchange_utils.orderbook_service import MarketDataHub
 
