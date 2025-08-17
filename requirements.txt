@@ -6,3 +6,4 @@ numpy>=1.25
 matplotlib>=3.8
 
 openai>=1.40.0
+pyyaml>=6.0
