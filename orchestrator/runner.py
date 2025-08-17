@@ -1,14 +1,17 @@
 """Asynchronous runner executing a single bot instance."""
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional
 
 from .models import BotConfig, BotStats
 from engine.strategy_base import StrategyBase
-from engine.strategy_params import map_mutations_to_params, Params
+from engine.strategy_params import Params, map_mutations_to_params
+from engine.ob_utils import try_fill_limit
+from exchange_utils.orderbook_service import MarketDataHub, market_data_hub
 
 
 class BotRunner:
@@ -22,6 +25,8 @@ class BotRunner:
         strategy: StrategyBase,
         storage: Any,
         ui_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+        hub: MarketDataHub = market_data_hub,
+        mode: str = "SIM",
     ) -> None:
         self.config = config
         self.limits = limits
@@ -29,6 +34,8 @@ class BotRunner:
         self.strategy = strategy
         self.storage = storage
         self.ui_callback = ui_callback or (lambda _: None)
+        self.hub = hub
+        self.mode = mode.upper()
 
     async def run(self) -> BotStats:
         """Execute the bot respecting the provided limits."""
@@ -39,139 +46,252 @@ class BotRunner:
         losses = 0
         pnl = 0.0
 
-        symbols = await self.strategy.select_pairs(params)
-        scans = 1
-        if self.limits.get("max_scans") is not None and scans > self.limits["max_scans"]:
-            raise RuntimeError("scan limit exceeded")
+        max_orders = self.limits.get("max_orders", float("inf"))
+        max_scans = self.limits.get("max_scans", 1)
+        max_runtime = self.limits.get("max_runtime_s", float("inf"))
 
-        open_orders: List[Tuple[Dict[str, Any], Dict[str, Any]]] = []
-        for sym in symbols:
-            if orders_count + 2 > self.limits.get("max_orders", float("inf")):
-                break
-            buy = await self.strategy.place_buy(params, sym)
-            expected_ticks = params.sell_k_ticks
+        scans = 0
+        while (
+            orders_count < max_orders
+            and scans < max_scans
+            and time.time() - start < max_runtime
+        ):
+            scans += 1
+            symbols = await self.strategy.select_pairs(params)
+            for sym in symbols:
+                if (
+                    orders_count >= max_orders
+                    or time.time() - start >= max_runtime
+                ):
+                    break
 
-            self.storage.save_order(
-                {
-                    "order_id": buy.get("id"),
+                # ensure depth subscription
+                self.hub.subscribe_depth(sym)
+
+                book = self.hub.get_order_book(sym)
+                if not book:
+                    await asyncio.sleep(0.1)
+                    continue
+
+                buy_data = await self.strategy.analyze_book(
+                    params, sym, book, mode=self.mode
+                )
+                if not buy_data:
+                    continue
+
+                amount = buy_data["amount"]
+                tick = buy_data["tick_size"]
+                buy_price = buy_data["price"]
+                buy_start = time.time()
+                buy_vwap = None
+                buy_cancels = 0
+
+                if self.mode == "LIVE":
+                    from engine.trade_live import (
+                        place_limit,
+                        fetch_order_status,
+                        cancel_order,
+                    )
+
+                    try:
+                        order = await asyncio.to_thread(
+                            place_limit, self.exchange, sym, "buy", buy_price, amount
+                        )
+                        oid = order.get("id")
+                        order = await asyncio.to_thread(
+                            fetch_order_status,
+                            self.exchange,
+                            sym,
+                            oid,
+                            params.max_wait_s,
+                        )
+                    except Exception:
+                        if "oid" in locals():
+                            try:
+                                await asyncio.to_thread(cancel_order, self.exchange, sym, oid)
+                            except Exception:
+                                pass
+                        continue
+                    filled = float(order.get("filled") or order.get("executedQty") or 0.0)
+                    buy_vwap = float(order.get("average") or order.get("price") or 0.0)
+                    if filled < amount:
+                        try:
+                            await asyncio.to_thread(cancel_order, self.exchange, sym, oid)
+                        except Exception:
+                            pass
+                        continue
+                    buy_price = float(order.get("price", buy_price))
+                else:
+                    while time.time() - buy_start < params.max_wait_s:
+                        b = self.hub.get_order_book(sym)
+                        if b:
+                            qty, vwap = try_fill_limit(b, "buy", buy_price, amount)
+                            if qty >= amount and vwap is not None:
+                                buy_vwap = vwap
+                                break
+                        buy_price += tick
+                        buy_cancels += 1
+                        await asyncio.sleep(0.1)
+
+                    if buy_vwap is None:
+                        continue
+
+                sell_order = self.strategy.build_sell_order(
+                    params, {**buy_data, "price": buy_price}, mode=self.mode
+                )
+                sell_price = sell_order["price"]
+                sell_vwap = None
+                sell_cancels = 0
+                sell_start = time.time()
+
+                if self.mode == "LIVE":
+                    try:
+                        sorder = await asyncio.to_thread(
+                            place_limit, self.exchange, sym, "sell", sell_price, amount
+                        )
+                        soid = sorder.get("id")
+                        sorder = await asyncio.to_thread(
+                            fetch_order_status,
+                            self.exchange,
+                            sym,
+                            soid,
+                            params.max_wait_s,
+                        )
+                    except Exception:
+                        if "soid" in locals():
+                            try:
+                                await asyncio.to_thread(
+                                    cancel_order, self.exchange, sym, soid
+                                )
+                            except Exception:
+                                pass
+                        continue
+                    filled = float(sorder.get("filled") or sorder.get("executedQty") or 0.0)
+                    sell_vwap = float(sorder.get("average") or sorder.get("price") or 0.0)
+                    if filled < amount:
+                        try:
+                            await asyncio.to_thread(
+                                cancel_order, self.exchange, sym, soid
+                            )
+                        except Exception:
+                            pass
+                        continue
+                    sell_price = float(sorder.get("price", sell_price))
+                else:
+                    while time.time() - sell_start < params.max_wait_s:
+                        b2 = self.hub.get_order_book(sym)
+                        if b2:
+                            qty, vwap = try_fill_limit(b2, "sell", sell_price, amount)
+                            if qty >= amount and vwap is not None:
+                                sell_vwap = vwap
+                                break
+                        sell_price -= tick
+                        sell_cancels += 1
+                        await asyncio.sleep(0.1)
+
+                    if sell_vwap is None:
+                        continue
+
+                hold_time = time.time() - buy_start
+                profit = (sell_vwap - buy_vwap) * amount
+                pnl += profit
+                if profit >= 0:
+                    wins += 1
+                else:
+                    losses += 1
+                actual_ticks = int(round((sell_vwap - buy_vwap) / tick))
+                expected_ticks = params.sell_k_ticks
+                top3_json = (
+                    json.dumps(buy_data.get("top3_depth"))
+                    if buy_data.get("top3_depth")
+                    else None
+                )
+                notional = buy_vwap * amount
+                pnl_pct = (profit / notional * 100.0) if notional else 0.0
+
+                buy_record = {
+                    "order_id": f"{sym}-buy-{orders_count}",
                     "bot_id": self.config.id,
                     "cycle_id": self.config.cycle,
-                    "symbol": buy.get("symbol", sym),
+                    "symbol": sym,
                     "side": "buy",
-                    "qty": buy.get("amount"),
-                    "price": buy.get("price"),
-                    "resulting_fill_price": None,
+                    "qty": amount,
+                    "price": buy_price,
+                    "resulting_fill_price": buy_vwap,
                     "fee_asset": None,
                     "fee_amount": None,
                     "ts": datetime.utcnow().isoformat(),
-                    "status": "open",
+                    "status": "filled",
                     "pnl": None,
                     "pnl_pct": None,
                     "expected_profit_ticks": expected_ticks,
                     "actual_profit_ticks": None,
-                    "spread_ticks": buy.get("spread_ticks"),
-                    "imbalance_pct": buy.get("imbalance_pct"),
-                    "top3_depth": json.dumps(buy.get("top3_depth")) if buy.get("top3_depth") else None,
-                    "book_hash": buy.get("book_hash"),
-                    "latency_ms": buy.get("latency_ms"),
-                    "cancel_replace_count": 0,
-                    "time_in_force": buy.get("time_in_force"),
+                    "spread_ticks": buy_data.get("spread_ticks"),
+                    "imbalance_pct": buy_data.get("imbalance_pct"),
+                    "top3_depth": top3_json,
+                    "book_hash": buy_data.get("book_hash"),
+                    "latency_ms": buy_data.get("latency_ms"),
+                    "cancel_replace_count": buy_cancels,
+                    "time_in_force": None,
                     "hold_time_s": None,
-                    "raw_json": json.dumps(buy),
+                    "raw_json": json.dumps({"price": buy_price, "amount": amount}),
                 }
-            )
-            sell = await self.strategy.place_sell_plus_ticks(params, sym, buy)
-            self.storage.save_order(
-                {
-                    "order_id": sell.get("id"),
+
+                sell_record = {
+                    "order_id": f"{sym}-sell-{orders_count}",
                     "bot_id": self.config.id,
                     "cycle_id": self.config.cycle,
-                    "symbol": sell.get("symbol", sym),
+                    "symbol": sym,
                     "side": "sell",
-                    "qty": sell.get("amount"),
-                    "price": sell.get("price"),
-                    "resulting_fill_price": None,
+                    "qty": amount,
+                    "price": sell_price,
+                    "resulting_fill_price": sell_vwap,
                     "fee_asset": None,
                     "fee_amount": None,
                     "ts": datetime.utcnow().isoformat(),
-                    "status": "open",
-                    "pnl": None,
-                    "pnl_pct": None,
+                    "status": "filled",
+                    "pnl": profit,
+                    "pnl_pct": pnl_pct,
                     "expected_profit_ticks": expected_ticks,
-                    "actual_profit_ticks": None,
-                    "spread_ticks": buy.get("spread_ticks"),
-                    "imbalance_pct": buy.get("imbalance_pct"),
+                    "actual_profit_ticks": actual_ticks,
+                    "spread_ticks": buy_data.get("spread_ticks"),
+                    "imbalance_pct": buy_data.get("imbalance_pct"),
                     "top3_depth": None,
                     "book_hash": None,
                     "latency_ms": None,
-                    "cancel_replace_count": 0,
-                    "time_in_force": sell.get("time_in_force"),
-                    "hold_time_s": None,
-                    "raw_json": json.dumps(sell),
+                    "cancel_replace_count": sell_cancels,
+                    "time_in_force": None,
+                    "hold_time_s": hold_time,
+                    "raw_json": json.dumps({"price": sell_price, "amount": amount}),
                 }
-            )
 
-            open_orders.append((buy, sell))
-            orders_count += 2
+                self.storage.save_order(buy_record)
+                self.storage.save_order(sell_record)
+                self.ui_callback(
+                    {
+                        "bot_id": self.config.id,
+                        "symbol": sym,
+                        "pnl": profit,
+                        "hold_time_s": hold_time,
+                    }
+                )
+                orders_count += 2
 
-        updates = await self.strategy.monitor_and_adjust(
-            params, open_orders, self.exchange.get_order_book
-        )
-        for (buy, sell), upd in zip(open_orders, updates):
-            pnl += upd.get("pnl", 0.0)
-            if upd.get("pnl", 0.0) >= 0:
-                wins += 1
-            else:
-                losses += 1
-            tick = buy.get("tick_size") or 1
-            expected_ticks = params.sell_k_ticks
-            actual_ticks = int(round((sell["price"] - buy["price"]) / tick))
-            
-            for side, order in (("buy", buy), ("sell", sell)):
-                data = {
-                    "order_id": order.get("id"),
-                    "bot_id": self.config.id,
-                    "cycle_id": self.config.cycle,
-                    "symbol": order.get("symbol"),
-                    "side": side,
-                    "qty": order.get("amount"),
-                    "price": order.get("price"),
-                    "resulting_fill_price": order.get("price"),
-                    "fee_asset": (order.get("fee") or {}).get("currency"),
-                    "fee_amount": (order.get("fee") or {}).get("cost"),
-                    "ts": datetime.utcnow().isoformat(),
-                    "status": "filled",
-                    "pnl": upd.get("pnl") if side == "sell" else None,
-                    "pnl_pct": upd.get("pnl_pct") if side == "sell" else None,
-                    "expected_profit_ticks": expected_ticks,
-                    "actual_profit_ticks": actual_ticks if side == "sell" else None,
-                    "spread_ticks": upd.get("spread_ticks"),
-                    "imbalance_pct": upd.get("imbalance_pct"),
-                    "top3_depth": json.dumps(upd.get("top3_depth")) if upd.get("top3_depth") else None,
-                    "book_hash": upd.get("book_hash"),
-                    "latency_ms": upd.get("latency_ms"),
-                    "cancel_replace_count": upd.get("cancel_replace_count"),
-                    "time_in_force": order.get("time_in_force"),
-                    "hold_time_s": upd.get("hold_time_s"),
-
-                    "raw_json": json.dumps(order),
-                }
-                self.storage.save_order(data)
-            self.ui_callback({"bot_id": self.config.id, **upd})
+            await asyncio.sleep(0)
 
         runtime_s = int(time.time() - start)
-        notional = params.order_size_usd * (orders_count / 2)
-        pnl_pct = (pnl / notional * 100.0) if notional else 0.0
-
+        notional_total = params.order_size_usd * (orders_count / 2)
+        pnl_pct_total = (pnl / notional_total * 100.0) if notional_total else 0.0
         stats = BotStats(
             bot_id=self.config.id,
             cycle=self.config.cycle,
             orders=orders_count,
             pnl=pnl,
-            pnl_pct=pnl_pct,
+            pnl_pct=pnl_pct_total,
             runtime_s=runtime_s,
             wins=wins,
             losses=losses,
         )
         self.storage.save_bot_stats(stats)
         return stats
+

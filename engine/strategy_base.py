@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from .strategy_params import Params
+from .ob_utils import book_hash, compute_imbalance, compute_spread_ticks
+from exchange_utils.exchange_meta import exchange_meta
 
 
 class StrategyBase:
@@ -35,57 +37,83 @@ class StrategyBase:
         symbols.sort(key=lambda x: x[1])
         return [s for s, _ in symbols]
 
-    async def place_buy(self, params: Params, symbol: str) -> Dict[str, Any]:
-        """Place a buy on the best ask when bid imbalance is high."""
-        book = await self.exchange.get_order_book(symbol)
+    async def analyze_book(
+        self, params: Params, symbol: str, book: Dict[str, Any], mode: str = "SIM"
+    ) -> Optional[Dict[str, Any]]:
+        """Evaluate order book and return buy order data if conditions met.
+
+        Parameters
+        ----------
+        params:
+            Strategy parameters controlling thresholds.
+        symbol:
+            Trading pair symbol.
+        book:
+            Order book snapshot obtained from :class:`MarketDataHub`.
+
+        Returns
+        -------
+        dict or None
+            Dictionary with order data and metrics or ``None`` if no trade
+            should be attempted.
+        """
+
         bids = book.get("bids", [])
         asks = book.get("asks", [])
-        bid_price, bid_qty = bids[0]
-        ask_price, ask_qty = asks[0]
-        imbalance = bid_qty / (bid_qty + ask_qty) * 100 if (bid_qty + ask_qty) else 0
-        if imbalance < params.imbalance_buy_threshold_pct:
-            raise RuntimeError("bid imbalance too low")
+        if not bids or not asks:
+            return None
+
+        bid_price, _ = bids[0]
+        ask_price, _ = asks[0]
+        imbalance_ratio = compute_imbalance(book)
+        imbalance_pct = imbalance_ratio * 100.0
+        if imbalance_pct < params.imbalance_buy_threshold_pct:
+            return None
+
         info = await self.exchange.get_market(symbol)
         tick = float(info.get("price_increment", 1e-8))
-        amount = params.order_size_usd / ask_price
-        spread_ticks = (ask_price - bid_price) / tick if tick else 0.0
-        order = await self.exchange.create_limit_buy_order(symbol, amount, ask_price)
-        order.update({"imbalance_pct": imbalance, "spread_ticks": spread_ticks, "tick_size": tick})
-        return order
+        raw_amount = params.order_size_usd / ask_price if ask_price else 0.0
+        if mode.upper() == "LIVE":
+            try:
+                ask_price, amount, filters = exchange_meta.round_price_qty(
+                    symbol, ask_price, raw_amount
+                )
+            except ValueError:
+                return None
+            tick = float(filters.get("priceIncrement", tick))
+        else:
+            amount = raw_amount
+        spread_ticks = compute_spread_ticks(book, tick)
+        top3 = {"bids": bids[:3], "asks": asks[:3]}
+        latency_ms = int((time.time() - book.get("ts", time.time())) * 1000)
+        return {
+            "symbol": symbol,
+            "price": ask_price,
+            "amount": amount,
+            "tick_size": tick,
+            "imbalance_pct": imbalance_pct,
+            "spread_ticks": spread_ticks,
+            "top3_depth": top3,
+            "book_hash": book_hash(book),
+            "latency_ms": latency_ms,
+        }
 
-    async def place_sell_plus_ticks(self, params: Params, symbol: str, buy_order: Dict[str, Any]) -> Dict[str, Any]:
-        """Sell ``sell_k_ticks`` above the buy price."""
-        tick = buy_order.get("tick_size") or (await self.exchange.get_market(symbol)).get("price_increment", 1e-8)
+    def build_sell_order(
+        self, params: Params, buy_order: Dict[str, Any], mode: str = "SIM"
+    ) -> Dict[str, Any]:
+        """Return a sell order ``sell_k_ticks`` above the buy price."""
+
+        tick = buy_order.get("tick_size", 0.0)
         price = buy_order["price"] + tick * params.sell_k_ticks
         amount = buy_order["amount"]
-        order = await self.exchange.create_limit_sell_order(symbol, amount, price)
-        return order
-
-    async def monitor_and_adjust(
-        self,
-        params: Params,
-        orders: List[Tuple[Dict[str, Any], Dict[str, Any]]],
-        order_book_provider: Any,
-    ) -> List[Dict[str, Any]]:
-        """Monitor until filled or timeout, returning PNL and metrics."""
-        updates: List[Dict[str, Any]] = []
-        start = time.time()
-        for buy, sell in orders:
-            await asyncio.sleep(0)  # simulation: instant fills
-            hold = time.time() - start
-            pnl = (sell["price"] - buy["price"]) * buy["amount"]
-            notional = buy["price"] * buy["amount"]
-            pnl_pct = (pnl / notional * 100.0) if notional else 0.0
-            updates.append(
-                {
-                    "symbol": buy["symbol"],
-                    "pnl": pnl,
-                    "pnl_pct": pnl_pct,
-                    "imbalance_pct": buy.get("imbalance_pct"),
-                    "spread_ticks": buy.get("spread_ticks"),
-                    "hold_time_s": hold,
-                    "cancel_replace_count": 0,
-                }
+        if mode.upper() == "LIVE":
+            price, amount, _ = exchange_meta.round_price_qty(
+                buy_order["symbol"], price, amount
             )
-        return updates
+        return {
+            "symbol": buy_order["symbol"],
+            "price": price,
+            "amount": amount,
+            "tick_size": tick,
+        }
 
