@@ -34,45 +34,67 @@ class InfoFrame(ttk.Labelframe):
         on_apply_winner_live: Callable[[], None],
         on_submit_patch: Callable[[], None],
     ) -> None:
-        super().__init__(parent, text="Información / Razones", padding=8)
-        self.columnconfigure(0, weight=1)
-        self.columnconfigure(1, weight=1)
+        super().__init__(parent, text="Información / Razones", padding=4)
+        self.columnconfigure((0, 1, 2), weight=1)
         self.rowconfigure(0, weight=1)
 
         self._log_queue: "queue.Queue[Callable[[], None]]" = queue.Queue()
         self.paused = False
 
         self.txt_logs = ScrolledText(self, height=3, autohide=True, wrap="word")
-        self.txt_logs.grid(row=0, column=0, columnspan=2, sticky="nsew")
+        self.txt_logs.grid(row=0, column=0, columnspan=3, sticky="nsew")
+
+        ttk.Label(self, text="Órdenes mínimas").grid(
+            row=1, column=0, sticky="w", padx=2, pady=2
+        )
+        ttk.Entry(self, textvariable=var_min_orders, width=10).grid(
+            row=1, column=1, columnspan=2, sticky="w", padx=2, pady=2
+        )
 
         ttk.Button(
-            self, text="Limpiar log", command=self.clear_logs, bootstyle=INFO
-        ).grid(row=1, column=0, sticky="ew", pady=(4, 0))
+            self,
+            text="Limpiar log",
+            command=self.clear_logs,
+            width=12,
+            bootstyle=INFO,
+        ).grid(row=2, column=0, sticky="ew", padx=2, pady=2)
         self.btn_pause = ttk.Button(
-            self, text="Pausar log", command=self.toggle_pause, bootstyle=INFO
+            self,
+            text="Pausar log",
+            command=self.toggle_pause,
+            width=12,
+            bootstyle=SECONDARY,
         )
-        self.btn_pause.grid(row=1, column=1, sticky="ew", pady=(4, 0))
-
-        ttk.Label(self, text="Órdenes mínimas").grid(row=2, column=0, sticky="w")
-        ttk.Entry(self, textvariable=var_min_orders, width=10).grid(row=2, column=1, sticky="e")
+        self.btn_pause.grid(row=2, column=1, sticky="ew", padx=2, pady=2)
         ttk.Button(
             self,
             text="Aplicar mín. órdenes",
             command=on_apply_min_orders,
-            bootstyle=INFO,
-        ).grid(row=3, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+            width=12,
+            bootstyle=WARNING,
+        ).grid(row=2, column=2, sticky="ew", padx=2, pady=2)
+
         ttk.Button(
-            self, text="Revertir patch", command=on_revert_patch, bootstyle=INFO
-        ).grid(row=4, column=0, sticky="ew", pady=(4, 0))
+            self,
+            text="Revertir patch",
+            command=on_revert_patch,
+            width=12,
+            bootstyle=INFO,
+        ).grid(row=3, column=0, sticky="ew", padx=2, pady=2)
         ttk.Button(
             self,
             text="Aplicar a LIVE",
             command=on_apply_winner_live,
-            bootstyle=INFO,
-        ).grid(row=4, column=1, sticky="ew", pady=(4, 0))
+            width=12,
+            bootstyle=WARNING,
+        ).grid(row=3, column=1, sticky="ew", padx=2, pady=2)
         ttk.Button(
-            self, text="Crear PR patch", command=on_submit_patch, bootstyle=INFO
-        ).grid(row=5, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+            self,
+            text="Crear PR patch",
+            command=on_submit_patch,
+            width=12,
+            bootstyle=SECONDARY,
+        ).grid(row=3, column=2, sticky="ew", padx=2, pady=2)
 
         self._last_prompt: Optional[str] = None
 
