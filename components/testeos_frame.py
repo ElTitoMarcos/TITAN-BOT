@@ -1,10 +1,10 @@
 from typing import Callable, Dict, Any
-import json
-import queue
 
 from ttkbootstrap.constants import *
 from tkinter import ttk
 import tkinter as tk
+
+from .info_frame import clean_text
 
 
 class TesteosFrame(ttk.Frame):
@@ -20,17 +20,13 @@ class TesteosFrame(ttk.Frame):
         self._on_toggle = on_toggle
         self._on_load_winner_for_sim = on_load_winner_for_sim
         self._running = False
-        self._log_queue: "queue.Queue[str]" = queue.Queue()
-        self.var_pause_logs = tk.BooleanVar(value=False)
         self._build()
-        self.after(200, self._process_log_queue)
 
     def _build(self) -> None:
         """Construye los widgets principales."""
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
         self.rowconfigure(4, weight=1)
-        self.rowconfigure(5, weight=1)
 
         self.var_num_bots = tk.IntVar(value=10)
         self.var_max_depth = tk.IntVar(value=20)
@@ -96,12 +92,13 @@ class TesteosFrame(ttk.Frame):
         self.lbl_winner = ttk.Label(self, text="Ganador: -", anchor="w")
         self.lbl_winner.grid(row=3, column=0, sticky="w", pady=(6, 0))
 
-        cols_c = ("cycle", "pnl", "winner", "fecha")
+        cols_c = ("cycle", "pnl", "winner", "reason", "fecha")
         self.tree_cycles = ttk.Treeview(self, columns=cols_c, show="headings", height=5)
         for c, txt, w in [
             ("cycle", "Ciclo", 80),
             ("pnl", "PNL Total", 100),
             ("winner", "Ganador", 120),
+            ("reason", "Razones", 200),
             ("fecha", "Fecha", 150),
         ]:
             self.tree_cycles.heading(c, text=txt)
@@ -110,28 +107,6 @@ class TesteosFrame(ttk.Frame):
         self.tree_cycles.configure(yscrollcommand=vsb_c.set)
         self.tree_cycles.grid(row=4, column=0, sticky="nsew", pady=(8, 0))
         vsb_c.grid(row=4, column=1, sticky="ns")
-
-        # Área de logs del LLM
-        log_frame = ttk.Frame(self)
-        log_frame.grid(row=5, column=0, sticky="nsew", pady=(8, 0))
-        log_frame.columnconfigure(0, weight=1)
-        log_frame.rowconfigure(0, weight=1)
-        self.txt_logs = tk.Text(log_frame, height=8)
-        vsb_l = ttk.Scrollbar(log_frame, orient="vertical", command=self.txt_logs.yview)
-        self.txt_logs.configure(yscrollcommand=vsb_l.set, state="disabled")
-        self.txt_logs.grid(row=0, column=0, sticky="nsew")
-        vsb_l.grid(row=0, column=1, sticky="ns")
-
-        ctrl = ttk.Frame(self)
-        ctrl.grid(row=6, column=0, sticky="w", pady=(4, 0))
-        ttk.Checkbutton(
-            ctrl,
-            text="Pausar logs",
-            variable=self.var_pause_logs,
-        ).grid(row=0, column=0, sticky="w")
-        ttk.Button(ctrl, text="Limpiar", command=self.clear_logs).grid(
-            row=0, column=1, padx=(8, 0)
-        )
 
     def _toggle(self) -> None:
         """Alterna el estado de los testeos y actualiza el botón."""
@@ -183,7 +158,7 @@ class TesteosFrame(ttk.Frame):
             vals = list(self.tree.item(str(bot_id), "values"))
             vals[-1] = "✅"
             self.tree.item(str(bot_id), values=vals)
-        self.lbl_winner.configure(text=f"Ganador: Bot {bot_id} - {reason}")
+        self.lbl_winner.configure(text=f"Ganador: Bot {bot_id} - {clean_text(reason)}")
 
     def add_cycle_history(self, info: Dict[str, Any]) -> None:
         """Agrega una fila al historial de ciclos."""
@@ -191,6 +166,7 @@ class TesteosFrame(ttk.Frame):
             info.get("cycle"),
             f"{info.get('total_pnl', 0.0):+.2f}",
             f"Bot {info.get('winner_id')}",
+            clean_text(info.get("winner_reason", "")),
             info.get("finished_at", ""),
         )
         self.tree_cycles.insert("", "end", values=values)
@@ -201,37 +177,6 @@ class TesteosFrame(ttk.Frame):
             self._on_load_winner_for_sim()
         except Exception:
             pass
-
-    # ------------------------------------------------------------------
-    def append_llm_log(self, tag: str, payload: Any) -> None:
-        """Recibe eventos del LLM y los encola para mostrarlos."""
-        try:
-            text = (
-                json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-                if not isinstance(payload, str)
-                else payload
-            )
-        except Exception:
-            text = str(payload)
-        self._log_queue.put(f"[LLM {tag}] {text}")
-
-    def _process_log_queue(self) -> None:
-        if not self.var_pause_logs.get():
-            try:
-                while True:
-                    line = self._log_queue.get_nowait()
-                    self.txt_logs.configure(state="normal")
-                    self.txt_logs.insert("end", line + "\n")
-                    self.txt_logs.see("end")
-                    self.txt_logs.configure(state="disabled")
-            except queue.Empty:
-                pass
-        self.after(200, self._process_log_queue)
-
-    def clear_logs(self) -> None:
-        self.txt_logs.configure(state="normal")
-        self.txt_logs.delete("1.0", "end")
-        self.txt_logs.configure(state="disabled")
 
     def get_params(self) -> Dict[str, Any]:
         """Retorna la configuración actual de los controles."""
