@@ -15,7 +15,7 @@ class OrdersClosedFrame(ttk.Frame):
         self.rowconfigure(0, weight=1)
 
         cols = ("fecha", "symbol", "price", "qty_usd")
-        self.tree = ttk.Treeview(self, columns=cols, show="headings", height=10)
+        self.tree = ttk.Treeview(self, columns=cols, show="headings", height=4)
         headings = [
             ("fecha", "Fecha", 150),
             ("symbol", "Par", 80),

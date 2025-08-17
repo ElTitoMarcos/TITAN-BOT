@@ -15,7 +15,7 @@ class OrdersOpenFrame(ttk.Frame):
         self.rowconfigure(0, weight=1)
 
         cols = ("id", "symbol", "price", "qty_usd", "fecha")
-        self.tree = ttk.Treeview(self, columns=cols, show="headings", height=10)
+        self.tree = ttk.Treeview(self, columns=cols, show="headings", height=4)
         headings = [
             ("id", "ID", 80),
             ("symbol", "Par", 80),
