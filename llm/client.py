@@ -97,10 +97,10 @@ class LLMClient:
             return False
 
     # ------------------------------------------------------------------
-    def _log(self, tag: str, payload: Any) -> None:
+    def _log(self, tag: str, payload: Any, label: Optional[str] = None) -> None:
         if self.on_log:
             try:
-                self.on_log(tag, payload)
+                self.on_log(tag, payload, label)
             except Exception:
                 pass
 
@@ -136,14 +136,18 @@ class LLMClient:
         return None
 
     # ------------------------------------------------------------------
-    def _call_openai(self, trading_spec_text: str) -> List[Dict[str, object]]:
+    def _call_openai(
+        self, trading_spec_text: str, label: Optional[str] = None
+    ) -> List[Dict[str, object]]:
         assert self._client is not None
         messages = [
             {"role": "system", "content": PROMPT_P0},
             {"role": "system", "content": PROMPT_INICIAL_VARIACIONES},
             {"role": "user", "content": trading_spec_text},
         ]
-        self._log("request", {"model": self.model, "messages": messages})
+        self._log(
+            "request", {"model": self.model, "messages": messages}, label
+        )
         try:
             resp = self._client.chat.completions.create(
                 model=self.model,
@@ -199,7 +203,9 @@ class LLMClient:
         raw: List[Dict[str, object]] = []
         if self._client is not None and self.check_credentials():
             try:
-                raw = self._call_openai(trading_spec_text)
+                raw = self._call_openai(
+                    trading_spec_text, label="Variaciones Iniciales"
+                )
             except Exception:
                 raw = []
         if not raw:
@@ -297,7 +303,9 @@ class LLMClient:
                     "content": json.dumps({"history_fingerprints": history_fingerprints}),
                 },
             ]
-            self._log("request", {"model": self.model, "messages": messages})
+            self._log(
+                "request", {"model": self.model, "messages": messages}, label="Nueva Generación"
+            )
             try:
                 resp = self._client.chat.completions.create(
                     model=self.model,
@@ -364,7 +372,9 @@ class LLMClient:
                 {"role": "system", "content": PROMPT_ANALISIS_CICLO},
                 {"role": "user", "content": json.dumps(cycle_summary)},
             ]
-            self._log("request", {"model": self.model, "messages": messages})
+            self._log(
+                "request", {"model": self.model, "messages": messages}, label="Análisis de Ciclo"
+            )
             try:
                 resp = self._client.chat.completions.create(
                     model=self.model,
@@ -394,7 +404,9 @@ class LLMClient:
                 {"role": "system", "content": PROMPT_META_GANADOR},
                 {"role": "user", "content": json.dumps(winners)},
             ]
-            self._log("request", {"model": self.model, "messages": messages})
+            self._log(
+                "request", {"model": self.model, "messages": messages}, label="Meta-ganador"
+            )
             try:
                 resp = self._client.chat.completions.create(
                     model=self.model,
@@ -542,7 +554,9 @@ class LLMClient:
                 {"role": "system", "content": PROMPT_ANALISIS_GLOBAL},
                 {"role": "user", "content": json.dumps(summary)},
             ]
-            self._log("request", {"model": self.model, "messages": messages})
+            self._log(
+                "request", {"model": self.model, "messages": messages}, label="Análisis Global"
+            )
             try:
                 resp = self._client.chat.completions.create(
                     model=self.model,

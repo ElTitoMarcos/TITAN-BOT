@@ -83,7 +83,7 @@ class App(tb.Window):
     def __init__(self):
         super().__init__(title="AutoBTC - Punto a Punto", themename="cyborg")
         self.geometry("1400x860")
-        self.minsize(1300, 760)
+        self.minsize(900, 600)
 
         self.colors = UIColors()
         self.cfg = Defaults()
@@ -126,9 +126,9 @@ class App(tb.Window):
     # ------------------- UI -------------------
     def _build_ui(self):
         # Grid principal
-        self.columnconfigure(0, weight=3)
-        self.columnconfigure(1, weight=2)
-        self.rowconfigure(1, weight=2)
+        self.columnconfigure(0, weight=1)
+        self.columnconfigure(1, weight=1)
+        self.rowconfigure(1, weight=1)
         self.rowconfigure(2, weight=1)
         try:
             self._ensure_exchange()
@@ -161,19 +161,17 @@ class App(tb.Window):
         self.lbl_bal.grid(row=1, column=3, sticky="e", padx=5)
 
         # Panel fijo para testeos masivos
+        container = ttk.Frame(self, padding=(10, 0, 10, 8))
+        container.grid(row=1, column=0, columnspan=2, sticky="nsew")
+        container.columnconfigure(0, weight=1)
+        container.rowconfigure(0, weight=1)
+
         self.testeos_frame = TesteosFrame(
-            self,
+            container,
             self.on_toggle_mass_tests,
             self.on_load_winner_for_sim,
         )
-        self.testeos_frame.grid(
-            row=1,
-            column=0,
-            columnspan=2,
-            sticky="nsew",
-            padx=(10, 10),
-            pady=(0, 8),
-        )
+        self.testeos_frame.grid(row=0, column=0, sticky="nsew")
 
         # Panel inferior izquierdo para órdenes
         left = ttk.Frame(self, padding=(10,0,10,10))
