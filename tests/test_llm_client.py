@@ -28,3 +28,11 @@ def test_generate_initial_variations_extracts_json(monkeypatch):
     res = client.generate_initial_variations("spec")
     assert res[0]["name"] == "foo"
     assert len(res) == 10
+
+def test_analyze_cycle_extracts_json_from_code_block():
+    content = "```json\n{\"winner_bot_id\": 7, \"reason\": \"ok\"}\n```"
+    client = LLMClient(api_key="")
+    client._client = DummyClient(content)
+    cycle = {"bots": [{"bot_id": 1, "stats": {"pnl": 0}}]}
+    res = client.analyze_cycle_and_pick_winner(cycle)
+    assert res["winner_bot_id"] == 7
