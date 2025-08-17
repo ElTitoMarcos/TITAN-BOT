@@ -11,7 +11,8 @@ from llm_client import LLMClient as EngineLLMClient
 from llm import LLMClient as MassLLMClient
 from components.testeos_frame import TesteosFrame
 from components.auth_frame import AuthFrame
-from components.info_frame import InfoFrame
+from components.info_frame import InfoFrame, clean_text
+
 from state.app_state import AppState as MassTestState
 from orchestrator.supervisor import Supervisor
 import exchange_utils.binance_check as binance_check
@@ -553,7 +554,9 @@ class App(tb.Window):
         if msg.startswith("[LLM]"):
             self.info_frame.append_llm_log("info", msg[5:].strip())
         else:
-            self._log_queue.put(msg)
+            if not hasattr(self, "_log_queue"):
+                self._log_queue = queue.Queue()
+            self._log_queue.put(clean_text(msg))
 
     def _poll_log_queue(self):
         try:
@@ -597,10 +600,14 @@ class App(tb.Window):
                     self.testeos_frame.update_bot_row(stats)
                 elif ev.message == "cycle_winner" and ev.payload:
                     wid = ev.payload.get("winner_id")
-                    reason = ev.payload.get("reason", "")
+                    reason = clean_text(ev.payload.get("reason", ""))
                     if wid is not None:
                         self._winner_cfg = self._supervisor.storage.get_bot(wid)
                         self.testeos_frame.set_winner(int(wid), reason)
+                        self.info_frame.append_llm_log("winner", {
+                            "bot_id": wid,
+                            "reason": reason,
+                        })
                 elif ev.message == "cycle_finished" and ev.payload:
                     info = ev.payload
                     info["cycle"] = ev.cycle

@@ -1,4 +1,3 @@
-import json
 import queue
 import tkinter as tk
 from typing import Any, Callable
@@ -7,6 +6,15 @@ from ttkbootstrap.constants import *
 from ttkbootstrap.scrolled import ScrolledText
 from tkinter import ttk
 
+def clean_text(payload: Any) -> str:
+    """Return a plain text representation without brackets or quotes."""
+    if isinstance(payload, dict):
+        text = ", ".join(f"{k}: {v}" for k, v in payload.items())
+    elif isinstance(payload, list):
+        text = ", ".join(str(x) for x in payload)
+    else:
+        text = str(payload)
+    return text.translate(str.maketrans("", "", "{}[]\"'"))
 
 class InfoFrame(ttk.Labelframe):
     """Frame que muestra información y logs del LLM."""
@@ -58,14 +66,8 @@ class InfoFrame(ttk.Labelframe):
     # ------------------------------------------------------------------
     def append_llm_log(self, tag: str, payload: Any) -> None:
         """Encola eventos del LLM para mostrarlos."""
-        try:
-            text = (
-                json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-                if not isinstance(payload, str)
-                else payload
-            )
-        except Exception:
-            text = str(payload)
+        text = clean_text(payload)
+
         self._log_queue.put(f"[LLM {tag}] {text}")
 
     def _process_log_queue(self) -> None:

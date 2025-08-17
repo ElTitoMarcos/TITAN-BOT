@@ -1,10 +1,11 @@
 from typing import Callable, Dict, Any
-import json
 import queue
 
 from ttkbootstrap.constants import *
 from tkinter import ttk
 import tkinter as tk
+
+from .info_frame import clean_text
 
 
 class TesteosFrame(ttk.Frame):
@@ -183,7 +184,7 @@ class TesteosFrame(ttk.Frame):
             vals = list(self.tree.item(str(bot_id), "values"))
             vals[-1] = "✅"
             self.tree.item(str(bot_id), values=vals)
-        self.lbl_winner.configure(text=f"Ganador: Bot {bot_id} - {reason}")
+        self.lbl_winner.configure(text=f"Ganador: Bot {bot_id} - {clean_text(reason)}")
 
     def add_cycle_history(self, info: Dict[str, Any]) -> None:
         """Agrega una fila al historial de ciclos."""
@@ -205,14 +206,7 @@ class TesteosFrame(ttk.Frame):
     # ------------------------------------------------------------------
     def append_llm_log(self, tag: str, payload: Any) -> None:
         """Recibe eventos del LLM y los encola para mostrarlos."""
-        try:
-            text = (
-                json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-                if not isinstance(payload, str)
-                else payload
-            )
-        except Exception:
-            text = str(payload)
+        text = clean_text(payload)
         self._log_queue.put(f"[LLM {tag}] {text}")
 
     def _process_log_queue(self) -> None:
