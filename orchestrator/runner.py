@@ -66,6 +66,8 @@ class BotRunner:
         params: Params = map_mutations_to_params(self.config.mutations)
         start = time.time()
         orders_count = 0
+        buy_count = 0
+        sell_count = 0
         wins = 0
         losses = 0
         pnl = 0.0
@@ -79,6 +81,7 @@ class BotRunner:
         max_runtime = self.limits.get("max_runtime_s", float("inf"))
 
         scans = 0
+        max_retries = 3
         while (
             orders_count < max_orders
             and scans < max_scans
@@ -108,178 +111,186 @@ class BotRunner:
                 if not buy_data:
                     continue
 
-                phase_ts = {"SELECT_PAIR": datetime.utcnow().isoformat()}
-                self._emit("INFO", "pair_selected", {"symbol": sym, "data": buy_data})
-                amount = buy_data["amount"]
-                tick = buy_data["tick_size"]
-                buy_price = buy_data["price"]
-                phase_ts["PREP_BUY"] = datetime.utcnow().isoformat()
+                buy_filled = False
+                buy_attempts = 0
+                while buy_attempts < max_retries and not buy_filled:
+                    phase_ts = {"SELECT_PAIR": datetime.utcnow().isoformat()}
+                    self._emit("INFO", "pair_selected", {"symbol": sym, "data": buy_data})
+                    amount = buy_data["amount"]
+                    tick = buy_data["tick_size"]
+                    buy_price = buy_data["price"]
+                    phase_ts["PREP_BUY"] = datetime.utcnow().isoformat()
 
-                # Estimate fill time before placing the buy order
-                book_full = self.hub.get_order_book(sym, top=100)
-                trade_rate = self.hub.get_trade_rate(sym, buy_price, "buy")
-                est = (
-                    estimate_fill_time(book_full, "buy", buy_price, amount, trade_rate)
-                    if book_full
-                    else None
-                )
-                if not est or est[1] > params.max_wait_s:
-                    continue
-                queue_qty, t_est = est
-                buy_metrics = {
-                    "expected_fill_time_s": t_est,
-                    "queue_ahead_qty": queue_qty,
-                    "trade_rate_qty_per_s": trade_rate,
-                }
+                    book_full = self.hub.get_order_book(sym, top=100)
+                    trade_rate = self.hub.get_trade_rate(sym, buy_price, "buy")
+                    est = (
+                        estimate_fill_time(book_full, "buy", buy_price, amount, trade_rate)
+                        if book_full
+                        else None
+                    )
+                    if not est or est[1] > params.max_wait_s:
+                        break
+                    queue_qty, t_est = est
+                    buy_metrics = {
+                        "expected_fill_time_s": t_est,
+                        "queue_ahead_qty": queue_qty,
+                        "trade_rate_qty_per_s": trade_rate,
+                    }
 
-                if self.mode == "LIVE":
-                    try:
-                        order = await self.strategy.submit_buy_live(sym, buy_price, amount)
-                    except Exception:
-                        self._emit("ERROR", "buy_submit_failed", {"symbol": sym})
-                        continue
-                    phase_ts["SUBMIT_BUY"] = datetime.utcnow().isoformat()
+                    if self.mode == "LIVE":
+                        try:
+                            order = await self.strategy.submit_buy_live(sym, buy_price, amount)
+                        except Exception:
+                            self._emit("ERROR", "buy_submit_failed", {"symbol": sym})
+                            break
+                        phase_ts["SUBMIT_BUY"] = datetime.utcnow().isoformat()
+                        self._emit(
+                            "INFO",
+                            "buy_submitted",
+                            {
+                                "symbol": sym,
+                                "price": buy_price,
+                                "qty": amount,
+                                "exchange_order_id": order.get("id"),
+                            },
+                        )
+                        res = await self.strategy.monitor_buy_live(
+                            params, sym, order.get("id"), buy_price, amount, tick, self.hub
+                        )
+                    else:
+                        phase_ts["SUBMIT_BUY"] = datetime.utcnow().isoformat()
+                        self._emit(
+                            "INFO",
+                            "buy_submitted",
+                            {"symbol": sym, "price": buy_price, "qty": amount},
+                        )
+
+                        if hasattr(self.strategy, "monitor_buy_sim"):
+                            res = await self.strategy.monitor_buy_sim(
+                                params, sym, buy_price, amount, tick, self.hub
+                            )
+                        else:
+                            res = {
+                                "filled_qty": amount,
+                                "avg_price": buy_price,
+                                "commission_paid": 0.0,
+                                "commission_asset": None,
+                                "cancel_replace_count": 0,
+                                "monitor_events": [],
+                                "actual_fill_time_s": t_est,
+                                "order_id": None,
+                                "fills": [],
+                            }
+                    phase_ts["MONITOR_BUY"] = datetime.utcnow().isoformat()
+                    if not res or res.get("aborted") or res.get("filled_qty", 0) < amount:
+                        reason_codes = [
+                            e.get("type") for e in (res or {}).get("monitor_events", [])
+                        ]
+                        if "timeout_cancel" in reason_codes:
+                            timeouts += 1
+                        phase_ts["ABORT"] = datetime.utcnow().isoformat()
+                        self._emit(
+                            "WARNING",
+                            "buy_aborted",
+                            {"symbol": sym, "reason_codes": reason_codes},
+                        )
+                        buy_attempts += 1
+                        if buy_attempts < max_retries:
+                            self._emit(
+                                "INFO",
+                                "buy_retry",
+                                {"symbol": sym, "attempt": buy_attempts},
+                            )
+                            await asyncio.sleep(0)
+                            continue
+                        break
+                    for ev in res.get("monitor_events", []):
+                        self._emit(
+                            "INFO",
+                            f"buy_{ev['type']}",
+                            {"symbol": sym, **{k: v for k, v in ev.items() if k != 'type'}},
+                            ts=ev.get("ts"),
+                        )
+                    buy_vwap = res["avg_price"]
+                    amount = res["filled_qty"]
+                    reason_codes = [
+                        e.get("type") for e in res.get("monitor_events", [])
+                    ]
+                    buy_metrics.update(
+                        {
+                            "actual_fill_time_s": res.get("actual_fill_time_s"),
+                            "monitor_events": res.get("monitor_events"),
+                            "commission_paid": res.get("commission_paid"),
+                            "commission_asset": res.get("commission_asset"),
+                            "cancel_replace_count": res.get("cancel_replace_count"),
+                            "exchange_order_id": res.get("order_id"),
+                            "fills": res.get("fills"),
+                            "reason_codes": reason_codes,
+                        }
+                    )
+                    buy_slip = int(round((buy_vwap - buy_price) / tick))
+                    buy_metrics["slippage_ticks"] = buy_slip
+                    buy_metrics["phase_timestamps"] = phase_ts
                     self._emit(
                         "INFO",
-                        "buy_submitted",
+                        "buy_filled",
                         {
                             "symbol": sym,
                             "price": buy_price,
+                            "vwap": buy_vwap,
                             "qty": amount,
-                            "exchange_order_id": order.get("id"),
                         },
                     )
-                    res = await self.strategy.monitor_buy_live(
-                        params, sym, order.get("id"), buy_price, amount, tick, self.hub
-                    )
-                else:
-                    phase_ts["SUBMIT_BUY"] = datetime.utcnow().isoformat()
-                    self._emit(
-                        "INFO",
-                        "buy_submitted",
-                        {"symbol": sym, "price": buy_price, "qty": amount},
-                    )
+                    buy_filled = True
 
-                    if hasattr(self.strategy, "monitor_buy_sim"):
-                        res = await self.strategy.monitor_buy_sim(
-                            params, sym, buy_price, amount, tick, self.hub
-                        )
-                    else:
-                        res = {
-                            "filled_qty": amount,
-                            "avg_price": buy_price,
-                            "commission_paid": 0.0,
-                            "commission_asset": None,
-                            "cancel_replace_count": 0,
-                            "monitor_events": [],
-                            "actual_fill_time_s": t_est,
-                            "order_id": None,
-                            "fills": [],
-                        }
-                phase_ts["MONITOR_BUY"] = datetime.utcnow().isoformat()
-                if not res or res.get("aborted") or res.get("filled_qty", 0) < amount:
-                    reason_codes = [e.get("type") for e in (res or {}).get("monitor_events", [])]
-                    if "timeout_cancel" in reason_codes:
-                        timeouts += 1
-                    phase_ts["ABORT"] = datetime.utcnow().isoformat()
-                    self._emit(
-                        "WARNING",
-                        "buy_aborted",
-                        {"symbol": sym, "reason_codes": reason_codes},
-                    )
+                if not buy_filled:
                     continue
-                for ev in res.get("monitor_events", []):
-                    self._emit(
-                        "INFO",
-                        f"buy_{ev['type']}",
-                        {"symbol": sym, **{k: v for k, v in ev.items() if k != 'type'}},
-                        ts=ev.get("ts"),
-                    )
-                buy_vwap = res["avg_price"]
-                amount = res["filled_qty"]
-                reason_codes = [e.get("type") for e in res.get("monitor_events", [])]
-                buy_metrics.update(
+                buy_count += 1
 
-                    {
-                        "actual_fill_time_s": res.get("actual_fill_time_s"),
-                        "monitor_events": res.get("monitor_events"),
-                        "commission_paid": res.get("commission_paid"),
-                        "commission_asset": res.get("commission_asset"),
-                        "cancel_replace_count": res.get("cancel_replace_count"),
-                        "exchange_order_id": res.get("order_id"),
-                        "fills": res.get("fills"),
-                        "reason_codes": reason_codes,
+                sell_filled = False
+                sell_attempts = 0
+                while sell_attempts < max_retries and not sell_filled:
+                    sell_order = self.strategy.build_sell_order(
+                        params, {**buy_data, "price": buy_price, "amount": amount}, mode=self.mode
+                    )
+                    sell_price = sell_order["price"]
+
+                    book2 = self.hub.get_order_book(sym, top=100)
+                    trade_rate2 = self.hub.get_trade_rate(sym, sell_price, "sell")
+                    est2 = (
+                        estimate_fill_time(book2, "sell", sell_price, amount, trade_rate2)
+                        if book2
+                        else None
+                    )
+                    if not est2 or est2[1] > params.max_wait_s:
+                        break
+                    queue_qty2, t_est2 = est2
+                    sell_metrics = {
+                        "expected_fill_time_s": t_est2,
+                        "queue_ahead_qty": queue_qty2,
+                        "trade_rate_qty_per_s": trade_rate2,
                     }
-                )
-                buy_slip = int(round((buy_vwap - buy_price) / tick))
-                buy_metrics["slippage_ticks"] = buy_slip
-                buy_metrics["phase_timestamps"] = phase_ts
-                self._emit(
-                    "INFO",
-                    "buy_filled",
-                    {"symbol": sym, "price": buy_price, "vwap": buy_vwap, "qty": amount},
-                )
-
-                sell_order = self.strategy.build_sell_order(
-                    params, {**buy_data, "price": buy_price, "amount": amount}, mode=self.mode
-                )
-                sell_price = sell_order["price"]
-
-                # Estimate fill time for the sell order
-                book2 = self.hub.get_order_book(sym, top=100)
-                trade_rate2 = self.hub.get_trade_rate(sym, sell_price, "sell")
-                est2 = (
-                    estimate_fill_time(book2, "sell", sell_price, amount, trade_rate2)
-                    if book2
-                    else None
-                )
-                if not est2 or est2[1] > params.max_wait_s:
-                    continue
-                queue_qty2, t_est2 = est2
-                sell_metrics = {
-                    "expected_fill_time_s": t_est2,
-                    "queue_ahead_qty": queue_qty2,
-                    "trade_rate_qty_per_s": trade_rate2,
-                }
-                if self.mode == "LIVE":
-                    try:
-                        sorder = await self.strategy.submit_sell_live(sym, sell_price, amount)
-                    except Exception:
-                        self._emit("ERROR", "sell_submit_failed", {"symbol": sym})
-                        continue
-                    phase_ts["SUBMIT_SELL"] = datetime.utcnow().isoformat()
-                    self._emit(
-                        "INFO",
-                        "sell_submitted",
-                        {
-                            "symbol": sym,
-                            "price": sell_price,
-                            "qty": amount,
-                            "exchange_order_id": sorder.get("id"),
-                        },
-                    )
-                    res = await self.strategy.monitor_sell_live(
-                        params,
-                        sym,
-                        sorder.get("id"),
-                        sell_price,
-                        amount,
-                        tick,
-                        self.hub,
-                        buy_vwap + tick * params.commission_buffer_ticks,
-                    )
-                else:
-                    phase_ts["SUBMIT_SELL"] = datetime.utcnow().isoformat()
-                    self._emit(
-                        "INFO",
-                        "sell_submitted",
-                        {"symbol": sym, "price": sell_price, "qty": amount},
-                    )
-
-                    if hasattr(self.strategy, "monitor_sell_sim"):
-                        res = await self.strategy.monitor_sell_sim(
+                    if self.mode == "LIVE":
+                        try:
+                            sorder = await self.strategy.submit_sell_live(sym, sell_price, amount)
+                        except Exception:
+                            self._emit("ERROR", "sell_submit_failed", {"symbol": sym})
+                            break
+                        phase_ts["SUBMIT_SELL"] = datetime.utcnow().isoformat()
+                        self._emit(
+                            "INFO",
+                            "sell_submitted",
+                            {
+                                "symbol": sym,
+                                "price": sell_price,
+                                "qty": amount,
+                                "exchange_order_id": sorder.get("id"),
+                            },
+                        )
+                        res = await self.strategy.monitor_sell_live(
                             params,
                             sym,
+                            sorder.get("id"),
                             sell_price,
                             amount,
                             tick,
@@ -287,59 +298,102 @@ class BotRunner:
                             buy_vwap + tick * params.commission_buffer_ticks,
                         )
                     else:
-                        res = {
-                            "filled_qty": amount,
-                            "avg_price": sell_price,
-                            "commission_paid": 0.0,
-                            "commission_asset": None,
-                            "cancel_replace_count": 0,
-                            "monitor_events": [],
-                            "actual_fill_time_s": t_est2,
-                            "order_id": None,
-                            "fills": [],
+                        phase_ts["SUBMIT_SELL"] = datetime.utcnow().isoformat()
+                        self._emit(
+                            "INFO",
+                            "sell_submitted",
+                            {"symbol": sym, "price": sell_price, "qty": amount},
+                        )
+
+                        if hasattr(self.strategy, "monitor_sell_sim"):
+                            res = await self.strategy.monitor_sell_sim(
+                                params,
+                                sym,
+                                sell_price,
+                                amount,
+                                tick,
+                                self.hub,
+                                buy_vwap + tick * params.commission_buffer_ticks,
+                            )
+                        else:
+                            res = {
+                                "filled_qty": amount,
+                                "avg_price": sell_price,
+                                "commission_paid": 0.0,
+                                "commission_asset": None,
+                                "cancel_replace_count": 0,
+                                "monitor_events": [],
+                                "actual_fill_time_s": t_est2,
+                                "order_id": None,
+                                "fills": [],
+                            }
+                    phase_ts["MONITOR_SELL"] = datetime.utcnow().isoformat()
+                    if not res or res.get("aborted") or res.get("filled_qty", 0) < amount:
+                        reason_codes = [
+                            e.get("type") for e in (res or {}).get("monitor_events", [])
+                        ]
+                        if "timeout_cancel" in reason_codes:
+                            timeouts += 1
+                        phase_ts["ABORT"] = datetime.utcnow().isoformat()
+                        self._emit(
+                            "WARNING",
+                            "sell_aborted",
+                            {"symbol": sym, "reason_codes": reason_codes},
+                        )
+                        sell_attempts += 1
+                        if sell_attempts < max_retries:
+                            self._emit(
+                                "INFO",
+                                "sell_retry",
+                                {"symbol": sym, "attempt": sell_attempts},
+                            )
+                            await asyncio.sleep(0)
+                            continue
+                        break
+                    for ev in res.get("monitor_events", []):
+                        self._emit(
+                            "INFO",
+                            f"sell_{ev['type']}",
+                            {"symbol": sym, **{k: v for k, v in ev.items() if k != 'type'}},
+                            ts=ev.get("ts"),
+                        )
+                    sell_vwap = res["avg_price"]
+                    reason_codes_sell = [
+                        e.get("type") for e in res.get("monitor_events", [])
+                    ]
+                    sell_metrics.update(
+                        {
+                            "actual_fill_time_s": res.get("actual_fill_time_s"),
+                            "monitor_events": res.get("monitor_events"),
+                            "commission_paid": res.get("commission_paid"),
+                            "commission_asset": res.get("commission_asset"),
+                            "cancel_replace_count": res.get("cancel_replace_count"),
+                            "exchange_order_id": res.get("order_id"),
+                            "fills": res.get("fills"),
+                            "reason_codes": reason_codes_sell,
+                            "phase_timestamps": phase_ts,
                         }
-                phase_ts["MONITOR_SELL"] = datetime.utcnow().isoformat()
-                if not res or res.get("aborted") or res.get("filled_qty", 0) < amount:
-                    reason_codes = [e.get("type") for e in (res or {}).get("monitor_events", [])]
-                    if "timeout_cancel" in reason_codes:
-                        timeouts += 1
-                    phase_ts["ABORT"] = datetime.utcnow().isoformat()
-                    self._emit(
-                        "WARNING",
-                        "sell_aborted",
-                        {"symbol": sym, "reason_codes": reason_codes},
                     )
-                    continue
-                for ev in res.get("monitor_events", []):
+                    sell_slip = int(round((sell_vwap - sell_price) / tick))
+                    sell_metrics["slippage_ticks"] = sell_slip
                     self._emit(
                         "INFO",
-                        f"sell_{ev['type']}",
-                        {"symbol": sym, **{k: v for k, v in ev.items() if k != 'type'}},
-                        ts=ev.get("ts"),
+                        "sell_filled",
+                        {
+                            "symbol": sym,
+                            "price": sell_price,
+                            "vwap": sell_vwap,
+                            "qty": amount,
+                        },
                     )
-                sell_vwap = res["avg_price"]
-                reason_codes_sell = [e.get("type") for e in res.get("monitor_events", [])]
-                sell_metrics.update(
+                    sell_filled = True
 
-                    {
-                        "actual_fill_time_s": res.get("actual_fill_time_s"),
-                        "monitor_events": res.get("monitor_events"),
-                        "commission_paid": res.get("commission_paid"),
-                        "commission_asset": res.get("commission_asset"),
-                        "cancel_replace_count": res.get("cancel_replace_count"),
-                        "exchange_order_id": res.get("order_id"),
-                        "fills": res.get("fills"),
-                        "reason_codes": reason_codes_sell,
-                        "phase_timestamps": phase_ts,
-                    }
-                )
-                sell_slip = int(round((sell_vwap - sell_price) / tick))
-                sell_metrics["slippage_ticks"] = sell_slip
-                self._emit(
-                    "INFO",
-                    "sell_filled",
-                    {"symbol": sym, "price": sell_price, "vwap": sell_vwap, "qty": amount},
-                )
+                if not sell_filled:
+                    # stop processing further buys if sell didn't complete
+                    scans = max_scans
+                    orders_count = max_orders
+                    break
+                sell_count += 1
 
                 hold_time = (
                     (buy_metrics or {}).get("actual_fill_time_s", 0.0)
@@ -441,6 +495,11 @@ class BotRunner:
                     "order_complete",
                     {"symbol": sym, "profit": profit, "hold_time_s": hold_time},
                 )
+                self._emit(
+                    "INFO",
+                    "pair_completed",
+                    {"symbol": sym, "profit": profit, "hold_time_s": hold_time},
+                )
                 self.ui_callback(
                     {
                         "bot_id": self.config.id,
@@ -467,6 +526,8 @@ class BotRunner:
             "bot_summary",
             {
                 "orders": orders_count,
+                "buys": buy_count,
+                "sells": sell_count,
                 "win_rate": win_rate,
                 "avg_hold_s": avg_hold,
                 "avg_slippage_ticks": avg_slip,

@@ -73,6 +73,7 @@ def test_operation_logging(tmp_path, monkeypatch):
         "sell_submitted",
         "sell_filled",
         "order_complete",
+        "pair_completed",
         "bot_summary",
     ]
     for e in events:
@@ -82,7 +83,7 @@ def test_operation_logging(tmp_path, monkeypatch):
 
     storage = SQLiteStorage(db_path=str(db))
     db_events = storage.get_events()
-    assert [ev.message for ev in db_events][-2:] == ["order_complete", "bot_summary"]
+    assert [ev.message for ev in db_events][-2:] == ["pair_completed", "bot_summary"]
 
     summary = storage.build_llm_cycle_summary(1)
     assert summary["cycle"] == 1
