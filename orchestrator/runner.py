@@ -77,7 +77,6 @@ class BotRunner:
                     "cancel_replace_count": 0,
                     "time_in_force": buy.get("time_in_force"),
                     "hold_time_s": None,
-
                     "raw_json": json.dumps(buy),
                 }
             )
@@ -127,7 +126,7 @@ class BotRunner:
             tick = buy.get("tick_size") or 1
             expected_ticks = params.sell_k_ticks
             actual_ticks = int(round((sell["price"] - buy["price"]) / tick))
-
+            
             for side, order in (("buy", buy), ("sell", sell)):
                 data = {
                     "order_id": order.get("id"),

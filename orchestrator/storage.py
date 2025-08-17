@@ -25,11 +25,54 @@ class SQLiteStorage:
 
     # ------------------------------------------------------------------
     def _init_db(self) -> None:
-        """Create tables if they do not yet exist."""
+        """Create tables if they do not yet exist and apply migrations."""
         schema_path = Path(__file__).resolve().parent.parent / "schema.sql"
         with open(schema_path, "r", encoding="utf-8") as fh:
             self.conn.executescript(fh.read())
+        # Older databases may miss recently added order columns. Ensure they
+        # exist so SELECT statements do not fail.
+        self._ensure_order_columns()
         self.conn.commit()
+
+    def _ensure_order_columns(self) -> None:
+        """Add any missing columns in the orders table.
+
+        The project evolved and new metrics were appended to the ``orders``
+        table over time. Users might still have a database created with an
+        older schema lacking some of these fields. This helper inspects the
+        current columns and performs ``ALTER TABLE`` operations for any
+        missing ones so that reads using ``_ORDER_COLS`` always succeed.
+        """
+
+        # Map of required columns and their SQL types.
+        required = {
+            "resulting_fill_price": "REAL",
+            "fee_asset": "TEXT",
+            "fee_amount": "REAL",
+            "ts": "TEXT",
+            "status": "TEXT",
+            "pnl": "REAL",
+            "pnl_pct": "REAL",
+            "notes": "TEXT",
+            "raw_json": "TEXT",
+            "expected_profit_ticks": "INTEGER",
+            "actual_profit_ticks": "INTEGER",
+            "spread_ticks": "REAL",
+            "imbalance_pct": "REAL",
+            "top3_depth": "TEXT",
+            "book_hash": "TEXT",
+            "latency_ms": "INTEGER",
+            "cancel_replace_count": "INTEGER",
+            "time_in_force": "TEXT",
+            "hold_time_s": "REAL",
+        }
+
+        existing = {
+            row[1] for row in self.conn.execute("PRAGMA table_info(orders)").fetchall()
+        }
+        for col, coltype in required.items():
+            if col not in existing:
+                self.conn.execute(f"ALTER TABLE orders ADD COLUMN {col} {coltype}")
 
     # ------------------------------------------------------------------
     # Events
