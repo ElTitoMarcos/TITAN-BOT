@@ -16,6 +16,7 @@ from llm import LLMClient
 from .models import BotConfig, BotStats, SupervisorEvent
 from .storage import SQLiteStorage
 from state.app_state import AppState
+from exchange_utils.orderbook_service import market_data_hub
 
 class Supervisor:
     """Orquesta ciclos de bots ejecutados en paralelo."""
