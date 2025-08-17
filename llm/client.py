@@ -3,8 +3,14 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from typing import Dict, List, Optional, Callable, Any
 import hashlib
+
+try:  # YAML es opcional; se usa para respuestas no estrictamente JSON
+    import yaml
+except Exception:  # pragma: no cover - si falta la dependencia simplemente ignoramos
+    yaml = None  # type: ignore
 
 from .prompts import (
     PROMPT_INICIAL_VARIACIONES,
@@ -112,6 +118,14 @@ class LLMClient:
         un bloque JSON delimitado por ``[]`` o ``{}`` dentro del texto.
         """
         txt = txt.strip()
+        if txt.startswith("```"):
+            # Remueve posible bloque de código Markdown
+            txt = txt.strip("`")
+            lines = txt.splitlines()
+            if lines and lines[0].strip().isalpha():
+                lines = lines[1:]
+            txt = "\n".join(lines).strip()
+
         try:
             return json.loads(txt)
         except Exception:
@@ -124,6 +138,15 @@ class LLMClient:
                 return json.loads(txt[start : end + 1])
             except Exception:
                 pass
+
+        if yaml is not None:
+            for candidate in (re.sub(r",\s*(\n|$)", r"\1", txt), txt):
+                try:
+                    y = yaml.safe_load(candidate)
+                    if isinstance(y, (list, dict)):
+                        return y
+                except Exception:
+                    continue
 
         start = txt.find("{")
         end = txt.rfind("}")
@@ -158,10 +181,15 @@ class LLMClient:
             raw_txt = resp.choices[0].message.content or ""
             self._log("response", raw_txt)
             data = self._extract_json(raw_txt)
-            if not isinstance(data, list):
-                self._log("response", {"error": "no json array", "raw": raw_txt})
-                return []
-            return data
+            if isinstance(data, dict):
+                for key in ("bots", "variations"):
+                    val = data.get(key)
+                    if isinstance(val, list):
+                        return val
+            if isinstance(data, list):
+                return data
+            self._log("response", {"error": "no json array", "raw": raw_txt})
+            return []
 
         except Exception as e:
             self._log("response", {"error": str(e)})
@@ -215,7 +243,11 @@ class LLMClient:
         seen = set()
         for item in raw:
             name = str(item.get("name")) if isinstance(item, dict) else ""
-            muts = item.get("mutations") if isinstance(item, dict) else None
+            muts = None
+            if isinstance(item, dict):
+                muts = item.get("mutations")
+                if muts is None:
+                    muts = item.get("mutation")
             if not name or not isinstance(muts, dict):
                 continue
             key = json.dumps(muts, sort_keys=True)
@@ -316,11 +348,16 @@ class LLMClient:
                 txt = resp.choices[0].message.content or "[]"
                 self._log("response", txt)
                 data = self._extract_json(txt)
-                if isinstance(data, list):
+                if isinstance(data, dict):
+                    for key in ("bots", "variations"):
+                        val = data.get(key)
+                        if isinstance(val, list):
+                            raw = val
+                            break
+                elif isinstance(data, list):
                     raw = data
-                else:
+                if not raw:
                     self._log("response", {"error": "no json array", "raw": txt})
-                    raw = []
             except Exception as e:
                 self._log("response", {"error": str(e)})
                 raw = []
@@ -331,7 +368,11 @@ class LLMClient:
         seen = set(history_fingerprints)
         for item in raw:
             name = str(item.get("name")) if isinstance(item, dict) else ""
-            muts = item.get("mutations") if isinstance(item, dict) else None
+            muts = None
+            if isinstance(item, dict):
+                muts = item.get("mutations")
+                if muts is None:
+                    muts = item.get("mutation")
             if not name or not isinstance(muts, dict):
                 continue
             fp = self._fingerprint(muts)
