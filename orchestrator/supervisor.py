@@ -103,6 +103,13 @@ class Supervisor:
             cycle = self.state.current_cycle + 1
             asyncio.run(self.run_cycle(cycle))
             stats = self.gather_results(cycle)
+            if not stats:
+                self._emit("ERROR", "cycle", cycle, None, "no_stats", {})
+                self.state.current_cycle = cycle
+                self.state.next_bot_id = self._next_bot_id
+                self.state.save()
+                continue
+
             cycle_summary = self._compose_cycle_summary(cycle, stats)
             self._emit(
                 "INFO", "llm", cycle, None, "llm_request", {"summary": cycle_summary}
@@ -120,8 +127,22 @@ class Supervisor:
                 self._emit(
                     "ERROR", "llm", cycle, None, "llm_error", {"error": str(exc)}
                 )
-                winner_id, winner_cfg = self.pick_winner(cycle)
-                winner_reason = "max_pnl"
+                try:
+                    winner_id, winner_cfg = self.pick_winner(cycle)
+                    winner_reason = "max_pnl"
+                except ValueError as err:
+                    self._emit(
+                        "ERROR",
+                        "cycle",
+                        cycle,
+                        None,
+                        "winner_selection_failed",
+                        {"error": str(err)},
+                    )
+                    self.state.current_cycle = cycle
+                    self.state.next_bot_id = self._next_bot_id
+                    self.state.save()
+                    continue
             total_pnl = sum(s.pnl for s in stats)
             cycle_summary["winner_bot_id"] = winner_id
             cycle_summary["winner_reason"] = winner_reason
