@@ -143,6 +143,7 @@ class LLMClient:
                 self._log("response", {"error": "no json array", "raw": raw_txt})
                 return []
             return data
+
         except Exception as e:
             self._log("response", {"error": str(e)})
             return []

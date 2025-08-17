@@ -29,7 +29,6 @@ def test_generate_initial_variations_extracts_json(monkeypatch):
     assert res[0]["name"] == "foo"
     assert len(res) == 10
 
-
 def test_analyze_cycle_extracts_json_from_code_block():
     content = "```json\n{\"winner_bot_id\": 7, \"reason\": \"ok\"}\n```"
     client = LLMClient(api_key="")
@@ -37,7 +36,6 @@ def test_analyze_cycle_extracts_json_from_code_block():
     cycle = {"bots": [{"bot_id": 1, "stats": {"pnl": 0}}]}
     res = client.analyze_cycle_and_pick_winner(cycle)
     assert res["winner_bot_id"] == 7
-
 
 def test_new_generation_extracts_json_from_code_block():
     content = "noise```json\n[{\"name\":\"foo\",\"mutations\":{}}]\n```more"
