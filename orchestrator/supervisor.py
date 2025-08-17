@@ -43,6 +43,7 @@ class Supervisor:
         app_state: Optional[AppState] = None,
         llm_client: Optional[LLMClient] = None,
         mode: str = "SIM",
+        min_orders: int = 50,
     ) -> None:
         """Crea el supervisor.
 
@@ -69,6 +70,7 @@ class Supervisor:
         self.hub: Optional[MarketDataHub] = None
         self.exchange_meta: Optional[ExchangeMeta] = None
         self._last_symbols: set[str] = set()
+        self.min_orders_per_bot = int(min_orders)
 
     # ------------------------------------------------------------------
     # Streaming de eventos
@@ -100,6 +102,10 @@ class Supervisor:
                 cb(event)
             except Exception:
                 pass
+
+    def set_min_orders(self, num: int) -> None:
+        """Configura el mínimo de órdenes requerido por bot."""
+        self.min_orders_per_bot = int(num)
 
     # ------------------------------------------------------------------
     def start_mass_tests(self, num_bots: int = 10) -> None:
@@ -294,7 +300,7 @@ class Supervisor:
 
             self._emit("INFO", "bot", cycle, cfg.id, "bot_start", {})
             start = time.time()
-            target_orders = random.randint(10, 100)
+            target_orders = max(self.min_orders_per_bot, random.randint(10, 100))
             total_pnl = random.uniform(-10.0, 10.0)
             steps = max(1, target_orders // 10)
             for step in range(steps):
