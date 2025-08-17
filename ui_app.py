@@ -148,9 +148,38 @@ class App(tb.Window):
         self.var_bot_live = tb.BooleanVar(value=False)
         self.var_live_confirm = tb.BooleanVar(value=False)
 
-        ttk.Checkbutton(header, text="BOT SIM", variable=self.var_bot_sim, style="success.Roundtoggle").grid(row=0, column=0, sticky="w", padx=5)
-        ttk.Checkbutton(header, text="BOT LIVE", variable=self.var_bot_live, style="warning.Roundtoggle").grid(row=0, column=1, sticky="w", padx=5)
-        ttk.Checkbutton(header, text="Confirm LIVE", variable=self.var_live_confirm, style="danger.Roundtoggle").grid(row=0, column=2, sticky="w", padx=5)
+        style = tb.Style()
+        style.configure("Large.TButton", font=("Segoe UI", 12, "bold"), padding=10)
+
+        self.btn_bot_sim = ttk.Button(
+            header,
+            text="BOT SIM OFF",
+            style="Large.TButton",
+            bootstyle=(SUCCESS, OUTLINE),
+            command=self._toggle_bot_sim,
+        )
+        self.btn_bot_sim.grid(row=0, column=0, sticky="w", padx=5)
+
+        self.btn_bot_live = ttk.Button(
+            header,
+            text="BOT LIVE OFF",
+            style="Large.TButton",
+            bootstyle=(WARNING, OUTLINE),
+            command=self._toggle_bot_live,
+            state="disabled",
+        )
+        self.btn_bot_live.grid(row=0, column=1, sticky="w", padx=5)
+
+        self.btn_confirm_live = ttk.Button(
+            header,
+            text="Confirm LIVE OFF",
+            style="Large.TButton",
+            bootstyle=(DANGER, OUTLINE),
+            command=self._toggle_confirm_live,
+        )
+        self.btn_confirm_live.grid(row=0, column=2, sticky="w", padx=5)
+
+        self._update_bot_buttons()
 
         self.btn_review = ttk.Button(
             header,
@@ -313,6 +342,31 @@ class App(tb.Window):
         self.var_bot_live.trace_add("write", self._on_bot_live)
         self.var_live_confirm.trace_add("write", self._on_live_confirm)
 
+    def _toggle_bot_sim(self) -> None:
+        self.var_bot_sim.set(not self.var_bot_sim.get())
+
+    def _toggle_bot_live(self) -> None:
+        if self.btn_bot_live.instate(["disabled"]):
+            return
+        self.var_bot_live.set(not self.var_bot_live.get())
+
+    def _toggle_confirm_live(self) -> None:
+        self.var_live_confirm.set(not self.var_live_confirm.get())
+
+    def _update_bot_buttons(self) -> None:
+        self.btn_bot_sim.configure(
+            text=f"BOT SIM {'ON' if self.var_bot_sim.get() else 'OFF'}",
+            bootstyle=SUCCESS if self.var_bot_sim.get() else (SUCCESS, OUTLINE),
+        )
+        self.btn_bot_live.configure(
+            text=f"BOT LIVE {'ON' if self.var_bot_live.get() else 'OFF'}",
+            bootstyle=WARNING if self.var_bot_live.get() else (WARNING, OUTLINE),
+        )
+        self.btn_confirm_live.configure(
+            text=f"Confirm LIVE {'ON' if self.var_live_confirm.get() else 'OFF'}",
+            bootstyle=DANGER if self.var_live_confirm.get() else (DANGER, OUTLINE),
+        )
+
     # ------------------- Helpers -------------------
     def _ensure_exchange(self):
         if self.exchange is None:
@@ -425,6 +479,7 @@ class App(tb.Window):
             if self._engine_sim and self._engine_sim.is_alive():
                 self._engine_sim.stop()
             self.lbl_state_sim.configure(text="SIM: OFF", bootstyle=SECONDARY)
+        self._update_bot_buttons()
 
     def _on_bot_live(self, *_):
         if self.var_bot_live.get():
@@ -446,13 +501,18 @@ class App(tb.Window):
             if self._engine_live and self._engine_live.is_alive():
                 self._engine_live.stop()
             self.lbl_state_live.configure(text="LIVE: OFF", bootstyle=SECONDARY)
+        self._update_bot_buttons()
 
     def _on_live_confirm(self, *_):
         val = bool(self.var_live_confirm.get())
         self.state.live_confirmed = val
         if self._engine_live:
             self._engine_live.state.live_confirmed = val
+        self.btn_bot_live.configure(state=("normal" if val else "disabled"))
+        if not val and self.var_bot_live.get():
+            self.var_bot_live.set(False)
         self.log_append(f"[LIVE] Confirmación {'activada' if val else 'desactivada'}")
+        self._update_bot_buttons()
 
     def _apply_llm(self):
         model = self.var_llm_model.get()
