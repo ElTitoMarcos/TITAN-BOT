@@ -11,7 +11,18 @@ from .prompts import (
     PROMPT_ANALISIS_CICLO,
     PROMPT_NUEVA_GENERACION_DESDE_GANADOR,
     PROMPT_P0,
+    PROMPT_META_GANADOR,
 )
+
+# Pesos por defecto para el análisis local de ciclos
+DEFAULT_METRIC_WEIGHTS: Dict[str, float] = {
+    "pnl": 0.35,
+    "timeouts": 0.25,
+    "slippage": 0.2,
+    "win_rate": 0.1,
+    "avg_hold_s": 0.06,
+    "cancel_replace_count": 0.04,
+}
 
 class LLMClient:
     """Wrapper liviano sobre OpenAI que genera variaciones iniciales.
@@ -336,11 +347,15 @@ class LLMClient:
         return unique
 
     # ------------------------------------------------------------------
-    def analyze_cycle_and_pick_winner(self, cycle_summary: Dict[str, object]) -> Dict[str, object]:
+    def analyze_cycle_and_pick_winner(
+        self,
+        cycle_summary: Dict[str, object],
+        weights: Optional[Dict[str, float]] = None,
+    ) -> Dict[str, object]:
         """Analiza un resumen de ciclo y elige un ganador.
 
-        Si la llamada al LLM falla o no hay API key, se usa como
-        fallback el bot con mayor PNL.
+        Si la llamada al LLM falla o no hay API key, se recurre a un
+        cálculo local basado en un score ponderado de múltiples métricas.
         """
 
         if self._client is not None:
@@ -368,30 +383,213 @@ class LLMClient:
                 self._log("response", {"error": "no json object", "raw": raw_txt})
             except Exception as e:
                 self._log("response", {"error": str(e)})
-        return self._fallback_winner(cycle_summary)
+        return self.pick_winner_local(cycle_summary, weights)
 
     # ------------------------------------------------------------------
-    def _fallback_winner(self, cycle_summary: Dict[str, object]) -> Dict[str, object]:
-        """Fallback determinista seleccionando el bot con mayor PnL.
-
-        Se recorre la lista de bots provista en ``cycle_summary`` y se
-        identifica el ``bot_id`` con mayor beneficio acumulado. Este camino
-        es utilizado cuando la llamada al LLM falla o no se dispone de clave
-        de API, evitando que el ciclo quede sin ganador.
-        """
-
-        bots = cycle_summary.get("bots", [])
-        best_id = None
-        best_pnl = float("-inf")
-        for bot in bots:
+    def pick_meta_winner(self, winners: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Elige un meta-ganador entre ganadores históricos."""
+        if self._client is not None:
+            messages = [
+                {"role": "system", "content": PROMPT_P0},
+                {"role": "system", "content": PROMPT_META_GANADOR},
+                {"role": "user", "content": json.dumps(winners)},
+            ]
+            self._log("request", {"model": self.model, "messages": messages})
             try:
-                pnl = float(bot.get("stats", {}).get("pnl", float("-inf")))
+                resp = self._client.chat.completions.create(
+                    model=self.model,
+                    temperature=0,
+                    messages=messages,
+                    timeout=40,
+                )
+                raw_txt = resp.choices[0].message.content or "{}"
+                self._log("response", raw_txt)
+                data = self._extract_json(raw_txt)
+                if isinstance(data, dict) and "bot_id" in data:
+                    return {
+                        "bot_id": int(data.get("bot_id", -1)),
+                        "reason": str(data.get("reason", "")),
+                    }
+                self._log("response", {"error": "no json object", "raw": raw_txt})
+            except Exception as e:
+                self._log("response", {"error": str(e)})
+        return self._fallback_meta_winner(winners)
+
+    def _fallback_meta_winner(self, winners: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Fallback determinista: selecciona el ganador con mayor PnL."""
+        best = None
+        best_pnl = float("-inf")
+        for w in winners:
+            try:
+                pnl = float(w.get("stats", {}).get("pnl", float("-inf")))
             except Exception:
                 pnl = float("-inf")
             if pnl > best_pnl:
                 best_pnl = pnl
-                best_id = bot.get("bot_id")
-        return {
-            "winner_bot_id": int(best_id) if best_id is not None else -1,
-            "reason": "max_pnl",
-        }
+                best = w
+        if best:
+            return {
+                "bot_id": int(best.get("bot_id", -1)),
+                "reason": "max_pnl",
+            }
+        return {"bot_id": -1, "reason": "no_winners"}
+
+    # ------------------------------------------------------------------
+    def pick_winner_local(
+        self,
+        cycle_summary: Dict[str, object],
+        weights: Optional[Dict[str, float]] = None,
+    ) -> Dict[str, object]:
+        """Selecciona un ganador mediante score ponderado.
+
+        ``weights`` permite ajustar la importancia relativa de cada métrica.
+        Los pesos que no se provean se completan con valores por defecto
+        ``DEFAULT_METRIC_WEIGHTS``. Se prioriza PnL, luego estabilidad
+        (timeouts y slippage), seguido de win rate, menor tiempo de hold y
+        menor cancelación/reemplazo. Los empates se resuelven de manera
+        determinista siguiendo el mismo orden de métricas.
+        """
+
+        bots = cycle_summary.get("bots", [])
+        if not bots:
+            return {"winner_bot_id": -1, "reason": "no_bots"}
+
+        w = DEFAULT_METRIC_WEIGHTS.copy()
+        if weights:
+            w.update(weights)
+
+        # recopilar valores por métrica
+        pnl_vals = [float(b.get("stats", {}).get("pnl", 0.0)) for b in bots]
+        timeout_vals = [float(b.get("stats", {}).get("timeouts", 0.0)) for b in bots]
+        slippage_vals = [float(b.get("stats", {}).get("avg_slippage_ticks", 0.0)) for b in bots]
+        win_vals = [float(b.get("stats", {}).get("win_rate", 0.0)) for b in bots]
+        hold_vals = [float(b.get("stats", {}).get("avg_hold_s", 0.0)) for b in bots]
+        crc_vals = [
+            float(b.get("stats", {}).get("cancel_replace_count", 0.0)) for b in bots
+        ]
+
+        def norm(val: float, vals: List[float], invert: bool = False) -> float:
+            mn = min(vals)
+            mx = max(vals)
+            if mx == mn:
+                res = 0.0
+            else:
+                res = (val - mn) / (mx - mn)
+            return 1 - res if invert else res
+
+        scored: List[Dict[str, float]] = []
+        for idx, bot in enumerate(bots):
+            score = (
+                w["pnl"] * norm(pnl_vals[idx], pnl_vals)
+                + w["timeouts"] * norm(timeout_vals[idx], timeout_vals, invert=True)
+                + w["slippage"] * norm(slippage_vals[idx], slippage_vals, invert=True)
+                + w["win_rate"] * norm(win_vals[idx], win_vals)
+                + w["avg_hold_s"] * norm(hold_vals[idx], hold_vals, invert=True)
+                + w["cancel_replace_count"]
+                * norm(crc_vals[idx], crc_vals, invert=True)
+            )
+            scored.append(
+                {
+                    "bot_id": int(bot.get("bot_id", -1)),
+                    "score": score,
+                    "pnl": pnl_vals[idx],
+                    "timeouts": timeout_vals[idx],
+                    "slippage": slippage_vals[idx],
+                    "win_rate": win_vals[idx],
+                    "avg_hold_s": hold_vals[idx],
+                    "cancel_replace_count": crc_vals[idx],
+                }
+            )
+
+        scored.sort(
+            key=lambda b: (
+                b["score"],
+                b["pnl"],
+                -b["timeouts"],
+                -b["slippage"],
+                b["win_rate"],
+                -b["avg_hold_s"],
+                -b["cancel_replace_count"],
+                -b["bot_id"],
+            ),
+            reverse=True,
+        )
+
+        winner = scored[0]
+        return {"winner_bot_id": winner["bot_id"], "reason": "weighted_score"}
+
+    # ------------------------------------------------------------------
+    def analyze_global(self, summary: Dict[str, Any]) -> Dict[str, Any]:
+        """Solicita al LLM recomendaciones globales.
+
+        Parameters
+        ----------
+        summary: Dict[str, Any]
+            Resumen global recopilado por el supervisor.
+
+        Returns
+        -------
+        Dict[str, Any]
+            Diccionario con la clave ``changes`` que contiene una lista de
+            sugerencias accionables.
+        """
+
+        if self._client is not None:
+            from .prompts import PROMPT_ANALISIS_GLOBAL
+
+            messages = [
+                {"role": "system", "content": PROMPT_P0},
+                {"role": "system", "content": PROMPT_ANALISIS_GLOBAL},
+                {"role": "user", "content": json.dumps(summary)},
+            ]
+            self._log("request", {"model": self.model, "messages": messages})
+            try:
+                resp = self._client.chat.completions.create(
+                    model=self.model,
+                    temperature=0,
+                    messages=messages,
+                    timeout=40,
+                )
+                raw_txt = resp.choices[0].message.content or "{}"
+                self._log("response", raw_txt)
+                data = self._extract_json(raw_txt)
+                if isinstance(data, dict) and data.get("changes"):
+                    return {"changes": list(data.get("changes", []))}
+                self._log("response", {"error": "no json object", "raw": raw_txt})
+            except Exception as e:
+                self._log("response", {"error": str(e)})
+
+        # Fallback simple con recomendaciones deterministas
+        return {"changes": ["aumentar_timeout", "revisar_slippage", "ajustar_pesos"]}
+
+    # ------------------------------------------------------------------
+    def propose_patch(self, changes: Dict[str, Any]) -> str:
+        """Obtiene un patch unificado basado en cambios sugeridos.
+
+        Si el LLM no está disponible, devuelve una cadena vacía.
+        """
+
+        if self._client is not None:
+            from .prompts import PROMPT_PATCH_FROM_CHANGES
+
+            messages = [
+                {"role": "system", "content": PROMPT_P0},
+                {"role": "system", "content": PROMPT_PATCH_FROM_CHANGES},
+                {"role": "user", "content": json.dumps(changes)},
+            ]
+            self._log("request", {"model": self.model, "messages": messages})
+            try:
+                resp = self._client.chat.completions.create(
+                    model=self.model,
+                    temperature=0,
+                    messages=messages,
+                    timeout=40,
+                )
+                diff = resp.choices[0].message.content or ""
+                self._log("response", diff)
+                return diff
+            except Exception as e:
+                self._log("response", {"error": str(e)})
+                return ""
+
+        return ""

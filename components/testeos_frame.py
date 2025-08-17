@@ -23,16 +23,46 @@ class TesteosFrame(ttk.Frame):
 
     def _build(self) -> None:
         """Construye los widgets principales."""
-        self.columnconfigure(0, weight=1)
-        self.rowconfigure(1, weight=1)
-        self.rowconfigure(4, weight=1)
+        self.columnconfigure(0, weight=3)
+        self.columnconfigure(1, weight=2)
+        self.rowconfigure(0, weight=1)
 
         self.var_num_bots = tk.IntVar(value=10)
         self.var_max_depth = tk.IntVar(value=20)
         self.var_depth_speed = tk.StringVar(value="100ms")
         self.var_mode = tk.StringVar(value="SIM")
 
-        top = ttk.Frame(self)
+        # Tabla de bots fija
+        tbl_frame = ttk.Frame(self)
+        tbl_frame.grid(row=0, column=0, sticky="nsew")
+        tbl_frame.columnconfigure(0, weight=1)
+        tbl_frame.rowconfigure(0, weight=1)
+
+        cols = ("bot_id", "cycle", "orders", "pnl", "status", "winner")
+        self.tree = ttk.Treeview(tbl_frame, columns=cols, show="headings", height=10)
+        headings = [
+            ("bot_id", "BotID", 80),
+            ("cycle", "Ciclo", 80),
+            ("orders", "Órdenes", 100),
+            ("pnl", "PNL", 100),
+            ("status", "Estado", 120),
+            ("winner", "EsGanador", 100),
+        ]
+        for col, txt, width in headings:
+            self.tree.heading(col, text=txt)
+            self.tree.column(col, width=width, anchor="center", stretch=True)
+        vsb = ttk.Scrollbar(tbl_frame, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=vsb.set)
+        self.tree.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+
+        # Panel lateral con controles e historial
+        side = ttk.Frame(self, padding=(8, 0, 0, 0))
+        side.grid(row=0, column=1, sticky="nsew")
+        side.columnconfigure(0, weight=1)
+        side.rowconfigure(3, weight=1)
+
+        top = ttk.Frame(side)
         top.grid(row=0, column=0, sticky="w")
         self.btn_toggle = ttk.Button(
             top,
@@ -66,33 +96,15 @@ class TesteosFrame(ttk.Frame):
             textvariable=self.var_mode,
         ).grid(row=0, column=8)
 
-        cols = ("bot_id", "cycle", "orders", "pnl", "status", "winner")
-        self.tree = ttk.Treeview(self, columns=cols, show="headings", height=10)
-        headings = [
-            ("bot_id", "BotID", 80),
-            ("cycle", "Ciclo", 80),
-            ("orders", "Órdenes", 100),
-            ("pnl", "PNL", 100),
-            ("status", "Estado", 120),
-            ("winner", "EsGanador", 100),
-        ]
-        for col, txt, width in headings:
-            self.tree.heading(col, text=txt)
-            self.tree.column(col, width=width, anchor="center", stretch=True)
-        vsb = ttk.Scrollbar(self, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscrollcommand=vsb.set)
-        self.tree.grid(row=1, column=0, sticky="nsew")
-        vsb.grid(row=1, column=1, sticky="ns")
-
         ttk.Button(
-            self, text="Subir Bot Sim", command=self.on_load_winner_for_sim
-        ).grid(row=2, column=0, sticky="w", pady=(8, 0))
+            side, text="Subir Bot Sim", command=self.on_load_winner_for_sim
+        ).grid(row=1, column=0, sticky="w", pady=(8, 0))
 
-        self.lbl_winner = ttk.Label(self, text="Ganador: -", anchor="w")
-        self.lbl_winner.grid(row=3, column=0, sticky="w", pady=(6, 0))
+        self.lbl_winner = ttk.Label(side, text="Ganador: -", anchor="w")
+        self.lbl_winner.grid(row=2, column=0, sticky="w", pady=(6, 0))
 
         cols_c = ("cycle", "pnl", "winner", "reason", "fecha")
-        self.tree_cycles = ttk.Treeview(self, columns=cols_c, show="headings", height=5)
+        self.tree_cycles = ttk.Treeview(side, columns=cols_c, show="headings", height=5)
         for c, txt, w in [
             ("cycle", "Ciclo", 80),
             ("pnl", "PNL Total", 100),
@@ -102,10 +114,10 @@ class TesteosFrame(ttk.Frame):
         ]:
             self.tree_cycles.heading(c, text=txt)
             self.tree_cycles.column(c, width=w, anchor="center", stretch=True)
-        vsb_c = ttk.Scrollbar(self, orient="vertical", command=self.tree_cycles.yview)
+        vsb_c = ttk.Scrollbar(side, orient="vertical", command=self.tree_cycles.yview)
         self.tree_cycles.configure(yscrollcommand=vsb_c.set)
-        self.tree_cycles.grid(row=4, column=0, sticky="nsew", pady=(8, 0))
-        vsb_c.grid(row=4, column=1, sticky="ns")
+        self.tree_cycles.grid(row=3, column=0, sticky="nsew", pady=(8, 0))
+        vsb_c.grid(row=3, column=1, sticky="ns")
 
     def _toggle(self) -> None:
         """Alterna el estado de los testeos y actualiza el botón."""

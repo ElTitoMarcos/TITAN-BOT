@@ -23,6 +23,7 @@ class InfoFrame(ttk.Labelframe):
         on_apply_min_orders: Callable[[], None],
         on_revert_patch: Callable[[], None],
         on_apply_winner_live: Callable[[], None],
+        on_submit_patch: Callable[[], None],
     ) -> None:
         super().__init__(parent, text="Información / Razones", padding=8)
         self.columnconfigure(0, weight=1)
@@ -46,6 +47,9 @@ class InfoFrame(ttk.Labelframe):
         )
         ttk.Button(self, text="Aplicar a LIVE", command=on_apply_winner_live).grid(
             row=3, column=1, sticky="ew", pady=(4, 0)
+        )
+        ttk.Button(self, text="Crear PR patch", command=on_submit_patch).grid(
+            row=4, column=0, columnspan=2, sticky="ew", pady=(4, 0)
         )
 
         self.after(200, self._process_log_queue)

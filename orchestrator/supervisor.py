@@ -10,7 +10,7 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from llm import LLMClient
 from .models import BotConfig, BotStats, SupervisorEvent
@@ -70,7 +70,13 @@ class Supervisor:
         self.hub: Optional[MarketDataHub] = None
         self.exchange_meta: Optional[ExchangeMeta] = None
         self._last_symbols: set[str] = set()
+        self._order_size_usd: float = float(self.state.order_size_usd)
+        self._order_size_mode: str = str(self.state.order_size_mode)
+        self._active_runners: List[Any] = []
         self.min_orders_per_bot = int(min_orders)
+        self._global_thread: Optional[threading.Thread] = None
+        self._global_stop: Optional[threading.Event] = None
+        self._global_interval_s: int = 6 * 3600
 
     # ------------------------------------------------------------------
     # Streaming de eventos
@@ -107,6 +113,30 @@ class Supervisor:
         """Configura el mínimo de órdenes requerido por bot."""
         self.min_orders_per_bot = int(num)
 
+    def set_order_size_usd(self, size: float, mode: Optional[str] = None) -> None:
+        """Actualiza el tamaño por operación y lo propaga a los bots activos."""
+
+        self._order_size_usd = float(size)
+        if mode is not None:
+            self._order_size_mode = mode
+            self.state.order_size_mode = mode
+        self.state.order_size_usd = self._order_size_usd
+        self.state.save()
+        for cfg in self._current_generation:
+            muts = cfg.mutations or {}
+            muts["order_size_usd"] = self._order_size_usd
+            cfg.mutations = muts
+            self.storage.save_bot(cfg)
+        for r in list(self._active_runners):
+            try:
+                r.update_order_size(self._order_size_usd)
+            except Exception:
+                pass
+
+    def register_runner(self, runner: Any) -> None:
+        """Registra un ``BotRunner`` activo para broadcasts en caliente."""
+        self._active_runners.append(runner)
+
     # ------------------------------------------------------------------
     def start_mass_tests(self, num_bots: int = 10) -> None:
         """Inicia el ciclo continuo de testeos en un hilo aparte."""
@@ -136,6 +166,10 @@ class Supervisor:
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
 
+        # arranca también el scheduler de análisis global si no está activo
+        if not self._global_thread:
+            self.start_global_scheduler(self._global_interval_s)
+
     def stop_mass_tests(self) -> None:
         """Detiene los ciclos de testeos."""
         self.mass_tests_enabled = False
@@ -145,6 +179,55 @@ class Supervisor:
             except Exception:
                 pass
             self.hub = None
+
+    # ------------------------------------------------------------------
+    # Global analysis scheduler
+    def start_global_scheduler(self, interval_s: int) -> None:
+        """Inicia el scheduler periódico de análisis global."""
+        self._global_interval_s = int(interval_s)
+        if self._global_thread and self._global_thread.is_alive():
+            return
+        self._global_stop = threading.Event()
+        self._global_thread = threading.Thread(
+            target=self._global_loop, daemon=True
+        )
+        self._global_thread.start()
+
+    def stop_global_scheduler(self) -> None:
+        """Detiene el scheduler de análisis global."""
+        if self._global_stop:
+            self._global_stop.set()
+        if self._global_thread:
+            self._global_thread.join(timeout=1)
+            self._global_thread = None
+
+    def _global_loop(self) -> None:
+        while self._global_stop and not self._global_stop.is_set():
+            time.sleep(self._global_interval_s)
+            if self._global_stop and self._global_stop.is_set():
+                break
+            try:
+                self.run_global_analysis()
+            except Exception as e:
+                self._emit("ERROR", "llm", None, None, "global_analysis_fail", {"error": str(e)})
+
+    def run_global_analysis(self) -> None:
+        summary = self.storage.gather_global_summary()
+        self._emit("INFO", "llm", None, None, "global_summary", summary)
+        insights = self.llm.analyze_global(summary)
+        self._emit("INFO", "llm", None, None, "global_insights", insights)
+
+        # Persist report to disk
+        ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        reports_dir = Path("reports")
+        reports_dir.mkdir(exist_ok=True)
+        with open(reports_dir / f"global_insights_{ts}.json", "w", encoding="utf-8") as fh:
+            json.dump({"summary": summary, "insights": insights}, fh, ensure_ascii=False, indent=2)
+
+        # Generate optional patch in dry-run mode
+        diff = self.llm.propose_patch(insights)
+        if diff:
+            self._emit("INFO", "llm", None, None, "global_patch", {"diff": diff})
 
     # ------------------------------------------------------------------
     def _loop(self) -> None:
@@ -166,7 +249,9 @@ class Supervisor:
                 "INFO", "llm", cycle, None, "llm_request", {"summary": cycle_summary}
             )
             try:
-                decision = self.llm.analyze_cycle_and_pick_winner(cycle_summary)
+                decision = self.llm.analyze_cycle_and_pick_winner(
+                    cycle_summary, self.state.metric_weights
+                )
                 self._emit("INFO", "llm", cycle, None, "llm_response", decision)
 
                 winner_id = int(decision.get("winner_bot_id", -1))
@@ -179,8 +264,14 @@ class Supervisor:
                     "ERROR", "llm", cycle, None, "llm_error", {"error": str(exc)}
                 )
                 try:
-                    winner_id, winner_cfg = self.pick_winner(cycle)
-                    winner_reason = "max_pnl"
+                    fallback = self.llm.pick_winner_local(
+                        cycle_summary, self.state.metric_weights
+                    )
+                    winner_id = int(fallback.get("winner_bot_id", -1))
+                    winner_reason = str(fallback.get("reason", "weighted_score"))
+                    winner_cfg = self.storage.get_bot(winner_id)
+                    if winner_cfg is None:
+                        raise ValueError("winner cfg not found")
                 except ValueError as err:
                     self._emit(
                         "ERROR",
@@ -276,12 +367,18 @@ class Supervisor:
 
             self._current_generation = []
             for i in range(self._num_bots):
-                var = variations[i] if i < len(variations) else {"name": f"Bot-{self._next_bot_id + i}", "mutations": {}}
+                var = (
+                    variations[i]
+                    if i < len(variations)
+                    else {"name": f"Bot-{self._next_bot_id + i}", "mutations": {}}
+                )
+                muts = var.get("mutations", {}) or {}
+                muts["order_size_usd"] = self._order_size_usd
                 cfg = BotConfig(
                     id=self._next_bot_id + i,
                     cycle=cycle,
                     name=str(var.get("name", f"Bot-{self._next_bot_id + i}")),
-                    mutations=var.get("mutations", {}),
+                    mutations=muts,
                     seed_parent=None,
                 )
                 self.storage.save_bot(cfg)
@@ -291,6 +388,9 @@ class Supervisor:
             # actualizar ciclo en configs existentes
             for cfg in self._current_generation:
                 cfg.cycle = cycle
+                muts = cfg.mutations or {}
+                muts["order_size_usd"] = self._order_size_usd
+                cfg.mutations = muts
                 self.storage.save_bot(cfg)
 
         self._emit("INFO", "cycle", cycle, None, "cycle_start", {})

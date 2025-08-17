@@ -38,8 +38,13 @@ Valida que el JSON sea parseable.
 """
 
 PROMPT_ANALISIS_CICLO = """
-Te paso un resumen del ciclo con 10 bots. Para cada bot: mutations, stats (orders, pnl, pnl_pct, win_rate, avg_hold_s, avg_slippage_ticks, timeouts, cancel_replace_count), top-3 pares por PnL, distribución de resultados por hora.
-Tarea: Elige UN ganador priorizando PNL y estabilidad (menor varianza y menos timeouts/slippage). Penaliza configuraciones con drawdowns altos o comportamiento errático. Devuelve JSON:
+Te paso un resumen del ciclo con 10 bots. Para cada bot: mutations, stats (orders, pnl,
+pnl_pct, win_rate, avg_hold_s, avg_slippage_ticks, timeouts, cancel_replace_count),
+top-3 pares por PnL y distribución de resultados por hora.
+Tarea: Elige UN ganador priorizando PNL, luego estabilidad (menos timeouts y slippage),
+después win_rate, luego menor avg_hold_s y finalmente menor cancel_replace_count. Puedes
+elegir un bot que despunte claramente en un aspecto clave aunque no tenga el mayor PNL.
+Devuelve JSON:
 { "winner_bot_id": <int>, "reason": "<breve explicación>" }
 El JSON debe ser parseable. Nada más.
 """
@@ -53,4 +58,30 @@ Genera 10 NUEVAS variaciones cercanas (mutaciones locales pequeñas), todas dist
 - Regla central de venta +1 tick puede extenderse a +k_ticks con max_wait_s, siempre cubriendo comisiones.
 Formato: igual que el prompt inicial (name + mutations). Devuelve JSON parseable.
 Evita duplicados: usa fingerprints (hashes) de conjuntos de parámetros que te paso.
+"""
+
+PROMPT_META_GANADOR = """
+Te paso una lista de ganadores históricos. Cada elemento incluye cycle, bot_id,
+mutations y stats (orders, pnl, pnl_pct, wins, losses, runtime_s).
+Elige UN meta-ganador con criterio multi-métrica: prioriza pnl y pnl_pct, pero
+también win_rate alto y estabilidad. Penaliza pérdidas o comportamientos
+inconsistentes.
+Devuelve JSON: { "bot_id": <int>, "reason": "<breve explicación>" }.
+El JSON debe ser parseable. Nada más.
+"""
+
+PROMPT_ANALISIS_GLOBAL = """
+Te paso un resumen global con métricas por mutación, tendencias,
+mejores pares y estabilidad general. Propón 3-5 cambios accionables
+para mejorar el sistema de testeos y trading. Devuelve JSON:
+{
+  "changes": ["<breve cambio 1>", "<breve cambio 2>", ...]
+}
+El JSON debe ser parseable. Nada más.
+"""
+
+PROMPT_PATCH_FROM_CHANGES = """
+Te paso una lista de cambios accionables en formato JSON. Genera un patch
+unificado (diff) que implemente de manera aproximada esas sugerencias.
+Devuelve solo el diff en texto plano sin explicación adicional.
 """
