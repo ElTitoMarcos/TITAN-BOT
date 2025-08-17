@@ -203,13 +203,11 @@ class Supervisor:
 
     def _global_loop(self) -> None:
         while self._global_stop and not self._global_stop.is_set():
-            time.sleep(self._global_interval_s)
-            if self._global_stop and self._global_stop.is_set():
-                break
             try:
                 self.run_global_analysis()
             except Exception as e:
                 self._emit("ERROR", "llm", None, None, "global_analysis_fail", {"error": str(e)})
+            time.sleep(self._global_interval_s)
 
     def run_global_analysis(self) -> None:
         summary = self.storage.gather_global_summary()
