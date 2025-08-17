@@ -166,7 +166,9 @@ class Supervisor:
                 "INFO", "llm", cycle, None, "llm_request", {"summary": cycle_summary}
             )
             try:
-                decision = self.llm.analyze_cycle_and_pick_winner(cycle_summary)
+                decision = self.llm.analyze_cycle_and_pick_winner(
+                    cycle_summary, self.state.metric_weights
+                )
                 self._emit("INFO", "llm", cycle, None, "llm_response", decision)
 
                 winner_id = int(decision.get("winner_bot_id", -1))
@@ -179,8 +181,14 @@ class Supervisor:
                     "ERROR", "llm", cycle, None, "llm_error", {"error": str(exc)}
                 )
                 try:
-                    winner_id, winner_cfg = self.pick_winner(cycle)
-                    winner_reason = "max_pnl"
+                    fallback = self.llm.pick_winner_local(
+                        cycle_summary, self.state.metric_weights
+                    )
+                    winner_id = int(fallback.get("winner_bot_id", -1))
+                    winner_reason = str(fallback.get("reason", "weighted_score"))
+                    winner_cfg = self.storage.get_bot(winner_id)
+                    if winner_cfg is None:
+                        raise ValueError("winner cfg not found")
                 except ValueError as err:
                     self._emit(
                         "ERROR",

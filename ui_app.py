@@ -108,6 +108,8 @@ class App(tb.Window):
         self._build_ui()
         # Instanciar LLM y supervisor después de construir UI para cablear logs
         llm_client = MassLLMClient(on_log=self.info_frame.append_llm_log)
+        # guardar referencia para futuras consultas (meta-ganador, etc.)
+        self.llm_client = llm_client
         self._supervisor = Supervisor(
             app_state=self.mass_state,
             llm_client=llm_client,
@@ -161,15 +163,20 @@ class App(tb.Window):
         self.lbl_pnl.grid(row=1, column=2, sticky="e", padx=5)
         self.lbl_bal.grid(row=1, column=3, sticky="e", padx=5)
 
-        # Pestañas principales
-        self.notebook = ttk.Notebook(self)
-        self.notebook.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=(10,10), pady=(0,8))
+        # Panel fijo para testeos masivos
         self.testeos_frame = TesteosFrame(
-            self.notebook,
+            self,
             self.on_toggle_mass_tests,
             self.on_load_winner_for_sim,
         )
-        self.notebook.add(self.testeos_frame, text="Testeos Masivos")
+        self.testeos_frame.grid(
+            row=1,
+            column=0,
+            columnspan=2,
+            sticky="nsew",
+            padx=(10, 10),
+            pady=(0, 8),
+        )
 
         # Panel inferior izquierdo para órdenes
         left = ttk.Frame(self, padding=(10,0,10,10))
@@ -534,20 +541,48 @@ class App(tb.Window):
             self._supervisor.stop_mass_tests()
 
     def on_load_winner_for_sim(self) -> None:
-        """Carga la configuración ganadora en el bot SIM."""
-        if not self._winner_cfg:
-            self.log_append("[TEST] No hay ganador disponible")
+        """Selecciona meta-ganador histórico y lo carga en el bot SIM."""
+        try:
+            winners = self._supervisor.storage.list_winners()
+        except Exception:
+            winners = []
+
+        if not winners:
+            self.log_append("[TEST] No hay ganadores históricos")
             return
+
+        # Pedir al LLM que elija el meta-ganador
+        try:
+            res = self.llm_client.pick_meta_winner(winners)
+            bot_id = res.get("bot_id")
+            reason = res.get("reason", "")
+        except Exception:
+            bot_id = None
+            reason = ""
+
+        if bot_id is None:
+            self.log_append("[TEST] No se pudo determinar meta-ganador")
+            return
+
+        cfg = self._supervisor.storage.get_bot(int(bot_id))
+        if not cfg:
+            self.log_append("[TEST] Configuración del ganador no encontrada")
+            return
+
+        # Guardar para posible uso posterior (aplicar a LIVE)
+        self._winner_cfg = cfg
+
         try:
             if self._engine_sim and self._engine_sim.is_alive():
                 self._engine_sim.stop()
-            self._engine_sim = load_sim_config(self._winner_cfg.mutations)
+            self._engine_sim = load_sim_config(cfg.mutations)
             self._engine_sim.start()
             self.var_bot_sim.set(True)
             self.lbl_state_sim.configure(text="SIM: ON", bootstyle=SUCCESS)
-            self.log_append("[TEST] Bot ganador cargado en modo SIM")
+            self.info_frame.append_llm_log("meta_winner", {"bot_id": bot_id, "reason": reason})
+            self.log_append("[TEST] Bot meta-ganador cargado en modo SIM")
         except Exception as exc:
-            self.log_append(f"[TEST] Error al cargar ganador: {exc}")
+            self.log_append(f"[TEST] Error al cargar meta-ganador: {exc}")
 
     # ------------------- Log helpers -------------------
     def log_append(self, msg: str):
