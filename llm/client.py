@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from typing import Dict, List, Optional, Callable, Any
 import hashlib
 
@@ -146,6 +147,15 @@ class LLMClient:
             except Exception:
                 pass
 
+        if yaml is not None:
+            for candidate in (re.sub(r",\s*(\n|$)", r"\1", txt), txt):
+                try:
+                    y = yaml.safe_load(candidate)
+                    if isinstance(y, (list, dict)):
+                        return y
+                except Exception:
+                    continue
+
         start = txt.find("{")
         end = txt.rfind("}")
         if start >= 0 and end > start:
@@ -241,7 +251,11 @@ class LLMClient:
         seen = set()
         for item in raw:
             name = str(item.get("name")) if isinstance(item, dict) else ""
-            muts = item.get("mutations") if isinstance(item, dict) else None
+            muts = None
+            if isinstance(item, dict):
+                muts = item.get("mutations")
+                if muts is None:
+                    muts = item.get("mutation")
             if not name or not isinstance(muts, dict):
                 continue
             key = json.dumps(muts, sort_keys=True)
@@ -362,7 +376,11 @@ class LLMClient:
         seen = set(history_fingerprints)
         for item in raw:
             name = str(item.get("name")) if isinstance(item, dict) else ""
-            muts = item.get("mutations") if isinstance(item, dict) else None
+            muts = None
+            if isinstance(item, dict):
+                muts = item.get("mutations")
+                if muts is None:
+                    muts = item.get("mutation")
             if not name or not isinstance(muts, dict):
                 continue
             fp = self._fingerprint(muts)

@@ -39,6 +39,19 @@ def test_generate_initial_variations_parses_yaml(monkeypatch):
     assert res[0]["name"] == "foo"
     assert len(res) == 10
 
+
+def test_generate_initial_variations_handles_trailing_commas_and_alias(monkeypatch):
+    content = (
+        "bots:\n  - name: bot_1,\n    mutation:\n      order_size_usd: 12.7,\n"
+    )
+    client = LLMClient(api_key="")
+    client._client = DummyClient(content)
+    monkeypatch.setattr(LLMClient, "check_credentials", lambda self: True)
+    res = client.generate_initial_variations("spec")
+    assert res[0]["name"] == "bot_1"
+    assert res[0]["mutations"]["order_size_usd"] == 12.7
+    assert len(res) == 10
+
 def test_analyze_cycle_extracts_json_from_code_block():
     content = "```json\n{\"winner_bot_id\": 7, \"reason\": \"ok\"}\n```"
     client = LLMClient(api_key="")
@@ -55,7 +68,6 @@ def test_new_generation_extracts_json_from_code_block():
     assert res[0]["name"] == "foo"
     assert len(res) == 10
 
-
 def test_new_generation_parses_yaml():
     content = "bots:\n  - name: foo\n    mutations: {}\n"
     client = LLMClient(api_key="")
@@ -64,6 +76,17 @@ def test_new_generation_parses_yaml():
     assert res[0]["name"] == "foo"
     assert len(res) == 10
 
+
+def test_new_generation_handles_trailing_commas_and_alias():
+    content = (
+        "bots:\n  - name: bot_1,\n    mutation:\n      order_size_usd: 12.7,\n"
+    )
+    client = LLMClient(api_key="")
+    client._client = DummyClient(content)
+    res = client.new_generation_from_winner({}, [])
+    assert res[0]["name"] == "bot_1"
+    assert res[0]["mutations"]["order_size_usd"] == 12.7
+    assert len(res) == 10
 
 def test_pick_meta_winner_extracts_json():
     content = "```json\n{\"bot_id\": 2, \"reason\": \"best pnl\"}\n```"
