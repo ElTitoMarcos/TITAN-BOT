@@ -18,7 +18,7 @@ class AppState:
     mode: str = "SIM"
     winner_config: Optional[Dict[str, Any]] = None
     apis_verified: Dict[str, bool] = field(
-        default_factory=lambda: {"binance": False, "llm": False, "codex": False}
+        default_factory=lambda: {"binance": False, "llm": False}
     )
     _file: str = field(init=False, repr=False)
 

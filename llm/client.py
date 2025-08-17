@@ -39,6 +39,20 @@ class LLMClient:
                 self._client = None
 
     # ------------------------------------------------------------------
+    def set_api_key(self, api_key: str) -> None:
+        """Actualiza la clave de API y reconfigura el cliente interno."""
+        self.api_key = api_key or ""
+        if self.api_key:
+            try:
+                from openai import OpenAI  # type: ignore
+
+                self._client = OpenAI(api_key=self.api_key)
+            except Exception:
+                self._client = None
+        else:
+            self._client = None
+
+    # ------------------------------------------------------------------
     def check_credentials(self) -> bool:
         """Verifies that the configured API key is valid.
 
@@ -93,13 +107,18 @@ class LLMClient:
             )
             txt = resp.choices[0].message.content or "[]"
             self._log("response", txt)
-            data = json.loads(txt)
-            if not isinstance(data, list):
-                raise ValueError("respuesta no es lista")
-            return data
+            try:
+                data = json.loads(txt)
+                if not isinstance(data, list):
+                    self._log("response", {"error": "respuesta no es lista", "raw": txt})
+                    return []
+                return data
+            except Exception as e:
+                self._log("response", {"error": str(e), "raw": txt})
+                return []
         except Exception as e:
             self._log("response", {"error": str(e)})
-            raise
+            return []
 
     # ------------------------------------------------------------------
     def _fallback_variations(self) -> List[Dict[str, object]]:
