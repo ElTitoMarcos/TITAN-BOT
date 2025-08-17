@@ -1,12 +1,37 @@
 """Parameter driven implementation of the original BTC strategy."""
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from dataclasses import dataclass
+from enum import Enum, auto
 from .strategy_params import Params
-from .ob_utils import book_hash, compute_imbalance, compute_spread_ticks
+from .ob_utils import book_hash, compute_imbalance, compute_spread_ticks, try_fill_limit
 from exchange_utils.exchange_meta import exchange_meta
+
+
+class OrderLifecycle(Enum):
+    """Lifecycle states for a trade."""
+
+    SELECT_PAIR = auto()
+    PREP_BUY = auto()
+    SUBMIT_BUY = auto()
+    MONITOR_BUY = auto()
+    SUBMIT_SELL = auto()
+    MONITOR_SELL = auto()
+    DONE = auto()
+    ABORT = auto()
+
+
+@dataclass
+class OrderOutcome:
+    pnl: float = 0.0
+    pnl_pct: float = 0.0
+    slippage_ticks: int | None = None
+    expected_fill_time_s: float | None = None
+    actual_fill_time_s: float | None = None
 
 class StrategyBase:
     """Execute the base BTC strategy under mutable parameters."""
@@ -37,6 +62,60 @@ class StrategyBase:
             candidates.append((sym, last, spread, imbalance))
         candidates.sort(key=lambda x: (x[2], -x[3], x[1]))
         return [s for s, *_ in candidates]
+
+    async def prepare_buy(self, params: Params, symbol: str) -> Optional[Dict[str, Any]]:
+        """Prepare buy order parameters for ``symbol``."""
+
+        book = await self.exchange.get_order_book(symbol)
+        if not book:
+            return None
+        return await self.analyze_book(params, symbol, book, mode="LIVE")
+
+    async def submit_buy_live(self, symbol: str, price: float, qty: float) -> Dict[str, Any]:
+        from engine.trade_live import place_limit
+
+        return await asyncio.to_thread(place_limit, self.exchange, symbol, "buy", price, qty)
+
+    async def simulate_buy(self, book: Dict[str, Any], price: float, qty: float) -> Optional[Tuple[float, float]]:
+        filled, vwap = try_fill_limit(book, "buy", price, qty)
+        if filled < qty:
+            return None
+        return filled, vwap
+
+    async def monitor_buy_live(
+        self, symbol: str, order_id: str, timeout_s: float
+    ) -> Dict[str, Any]:
+        from engine.trade_live import fetch_order_status
+
+        return await asyncio.to_thread(
+            fetch_order_status, self.exchange, symbol, order_id, timeout_s
+        )
+
+    async def monitor_buy_sim(self, expected_time_s: float) -> float:
+        return expected_time_s
+
+    async def submit_sell_live(self, symbol: str, price: float, qty: float) -> Dict[str, Any]:
+        from engine.trade_live import place_limit
+
+        return await asyncio.to_thread(place_limit, self.exchange, symbol, "sell", price, qty)
+
+    async def simulate_sell(self, book: Dict[str, Any], price: float, qty: float) -> Optional[Tuple[float, float]]:
+        filled, vwap = try_fill_limit(book, "sell", price, qty)
+        if filled < qty:
+            return None
+        return filled, vwap
+
+    async def monitor_sell_live(
+        self, symbol: str, order_id: str, timeout_s: float
+    ) -> Dict[str, Any]:
+        from engine.trade_live import fetch_order_status
+
+        return await asyncio.to_thread(
+            fetch_order_status, self.exchange, symbol, order_id, timeout_s
+        )
+
+    async def monitor_sell_sim(self, expected_time_s: float) -> float:
+        return expected_time_s
 
     async def analyze_book(
         self, params: Params, symbol: str, book: Dict[str, Any], mode: str = "SIM"
