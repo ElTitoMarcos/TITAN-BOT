@@ -17,6 +17,7 @@ class AppState:
     bots_per_cycle: int = 10
     mode: str = "SIM"
     winner_config: Optional[Dict[str, Any]] = None
+    # Flags de verificación para servicios externos
     apis_verified: Dict[str, bool] = field(
         default_factory=lambda: {"binance": False, "llm": False}
     )

@@ -368,7 +368,17 @@ class App(tb.Window):
         }
         self.mass_state.save()
         self.after(0, lambda: self.auth_frame.update_badges(self.mass_state.apis_verified))
-        self.after(0, lambda: self.log_append("[API] Verificación completada"))
+        def _log_result() -> None:
+            if bin_ok and llm_ok:
+                self.log_append("[API] Verificación exitosa")
+            else:
+                missing: List[str] = []
+                if not bin_ok:
+                    missing.append("Binance")
+                if not llm_ok:
+                    missing.append("LLM")
+                self.log_append(f"[API] Error en {' y '.join(missing)}")
+        self.after(0, _log_result)
         self.after(0, self._apply_api_locks)
 
     def _apply_api_locks(self) -> None:
@@ -383,6 +393,13 @@ class App(tb.Window):
 
     def _on_bot_sim(self, *_):
         if self.var_bot_sim.get():
+            if not (
+                self.mass_state.apis_verified.get("binance")
+                and self.mass_state.apis_verified.get("llm")
+            ):
+                self.log_append("[SIM] APIs no verificadas")
+                self.var_bot_sim.set(False)
+                return
             if not self._engine_sim or not self._engine_sim.is_alive():
                 self._ensure_exchange()
                 self._engine_sim = Engine(self._on_engine_snapshot, self.log_append, exchange=self.exchange, name="SIM")
@@ -396,6 +413,13 @@ class App(tb.Window):
 
     def _on_bot_live(self, *_):
         if self.var_bot_live.get():
+            if not (
+                self.mass_state.apis_verified.get("binance")
+                and self.mass_state.apis_verified.get("llm")
+            ):
+                self.log_append("[LIVE] APIs no verificadas")
+                self.var_bot_live.set(False)
+                return
             if not self._engine_live or not self._engine_live.is_alive():
                 self._ensure_exchange()
                 self._engine_live = Engine(self._on_engine_snapshot, self.log_append, exchange=self.exchange, name="LIVE")
