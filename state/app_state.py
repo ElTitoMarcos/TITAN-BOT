@@ -30,6 +30,8 @@ class AppState:
             "cancel_replace_count": 0.04,
         }
     )
+    order_size_usd: float = 50.0
+    order_size_mode: str = "Fijo"
     _file: str = field(init=False, repr=False)
 
     def __post_init__(self) -> None:

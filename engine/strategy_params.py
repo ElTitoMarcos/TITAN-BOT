@@ -43,7 +43,9 @@ def _clamp(value: float, low: float, high: float) -> float:
     return max(low, min(high, value))
 
 
-def map_mutations_to_params(mutations: Dict[str, Any] | None) -> Params:
+def map_mutations_to_params(
+    mutations: Dict[str, Any] | None, order_size_usd: float | None = None
+) -> Params:
     """Translate mutation dictionaries into :class:`Params`.
 
     Unknown keys are ignored. Basic validation/clamping is applied so the
@@ -99,6 +101,12 @@ def map_mutations_to_params(mutations: Dict[str, Any] | None) -> Params:
         params.risk_limits.per_pair_exposure_usd = float(
             rl.get("per_pair_exposure_usd", params.risk_limits.per_pair_exposure_usd)
         )
+
+    if order_size_usd is not None:
+        try:
+            params.order_size_usd = float(order_size_usd)
+        except (TypeError, ValueError):
+            pass
 
     return params
 

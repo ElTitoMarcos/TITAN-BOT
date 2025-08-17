@@ -10,7 +10,7 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from llm import LLMClient
 from .models import BotConfig, BotStats, SupervisorEvent
@@ -70,7 +70,9 @@ class Supervisor:
         self.hub: Optional[MarketDataHub] = None
         self.exchange_meta: Optional[ExchangeMeta] = None
         self._last_symbols: set[str] = set()
-        self._order_size_usd: float = 50.0
+        self._order_size_usd: float = float(self.state.order_size_usd)
+        self._order_size_mode: str = str(self.state.order_size_mode)
+        self._active_runners: List[Any] = []
         self.min_orders_per_bot = int(min_orders)
 
     # ------------------------------------------------------------------
@@ -108,20 +110,29 @@ class Supervisor:
         """Configura el mínimo de órdenes requerido por bot."""
         self.min_orders_per_bot = int(num)
 
-    def set_order_size_usd(self, size: float) -> None:
-        """Actualiza el ``order_size_usd`` base para los bots.
-
-        El valor se aplica inmediatamente a los bots activos y se utilizará
-        para las generaciones futuras.
-        """
+    def set_order_size_usd(self, size: float, mode: Optional[str] = None) -> None:
+        """Actualiza el tamaño por operación y lo propaga a los bots activos."""
 
         self._order_size_usd = float(size)
+        if mode is not None:
+            self._order_size_mode = mode
+            self.state.order_size_mode = mode
+        self.state.order_size_usd = self._order_size_usd
+        self.state.save()
         for cfg in self._current_generation:
             muts = cfg.mutations or {}
-            if float(muts.get("order_size_usd", 0)) < self._order_size_usd:
-                muts["order_size_usd"] = self._order_size_usd
-                cfg.mutations = muts
-                self.storage.save_bot(cfg)
+            muts["order_size_usd"] = self._order_size_usd
+            cfg.mutations = muts
+            self.storage.save_bot(cfg)
+        for r in list(self._active_runners):
+            try:
+                r.update_order_size(self._order_size_usd)
+            except Exception:
+                pass
+
+    def register_runner(self, runner: Any) -> None:
+        """Registra un ``BotRunner`` activo para broadcasts en caliente."""
+        self._active_runners.append(runner)
 
     # ------------------------------------------------------------------
     def start_mass_tests(self, num_bots: int = 10) -> None:
@@ -306,8 +317,7 @@ class Supervisor:
                     else {"name": f"Bot-{self._next_bot_id + i}", "mutations": {}}
                 )
                 muts = var.get("mutations", {}) or {}
-                if float(muts.get("order_size_usd", 0)) < self._order_size_usd:
-                    muts["order_size_usd"] = self._order_size_usd
+                muts["order_size_usd"] = self._order_size_usd
                 cfg = BotConfig(
                     id=self._next_bot_id + i,
                     cycle=cycle,
@@ -323,9 +333,8 @@ class Supervisor:
             for cfg in self._current_generation:
                 cfg.cycle = cycle
                 muts = cfg.mutations or {}
-                if float(muts.get("order_size_usd", 0)) < self._order_size_usd:
-                    muts["order_size_usd"] = self._order_size_usd
-                    cfg.mutations = muts
+                muts["order_size_usd"] = self._order_size_usd
+                cfg.mutations = muts
                 self.storage.save_bot(cfg)
 
         self._emit("INFO", "cycle", cycle, None, "cycle_start", {})
