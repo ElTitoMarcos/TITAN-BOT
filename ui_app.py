@@ -1,4 +1,4 @@
-import threading, queue, time, json, os, copy
+import threading, queue, time, json, os, copy, asyncio
 import ttkbootstrap as tb
 from ttkbootstrap.constants import *
 from ttkbootstrap.scrolled import ScrolledText
@@ -9,9 +9,12 @@ from config import UIColors, Defaults, AppState as CoreAppState
 from engine import Engine, load_sim_config
 from llm_client import LLMClient as EngineLLMClient
 from llm import LLMClient as MassLLMClient
+from codex.client import CodexClient
 from components.testeos_frame import TesteosFrame
+from components.auth_frame import AuthFrame
 from state.app_state import AppState as MassTestState
 from orchestrator.supervisor import Supervisor
+import exchange_utils.binance_check as binance_check
 
 BADGE_SIM = "🔧SIM"
 BADGE_LIVE = "⚡LIVE"
@@ -43,15 +46,21 @@ class App(tb.Window):
             key_name = str(self.var_bin_key) if hasattr(self, "var_bin_key") else None
             sec_name = str(self.var_bin_sec) if hasattr(self, "var_bin_sec") else None
             oai_name = str(self.var_oai_key) if hasattr(self, "var_oai_key") else None
+            codex_name = str(self.var_codex_key) if hasattr(self, "var_codex_key") else None
+            use_codex_name = str(self.var_use_codex) if hasattr(self, "var_use_codex") else None
             for w in self._iter_all_widgets():
                 try:
                     if w.winfo_class() in ("TEntry", "Entry"):
                         tv = w.cget("textvariable") if "textvariable" in w.keys() else ""
-                        if tv in (key_name, sec_name, oai_name):
+                        if tv in (key_name, sec_name, oai_name, codex_name):
                             w.configure(state="normal")
                     if w.winfo_class() in ("TButton", "Button"):
                         txt = w.cget("text") if "text" in w.keys() else ""
                         if "Confirmar APIs" in str(txt):
+                            w.configure(state="normal")
+                    if w.winfo_class() in ("TCheckbutton", "Checkbutton"):
+                        tv = w.cget("variable") if "variable" in w.keys() else ""
+                        if tv == use_codex_name:
                             w.configure(state="normal")
                 except Exception:
                     pass
@@ -101,6 +110,7 @@ class App(tb.Window):
         self._winner_cfg = None
 
         self._keys_file = os.path.join(os.path.dirname(__file__), ".api_keys.json")
+        self._codex_buttons: List[ttk.Button] = []
 
         self._build_ui()
         # Instanciar LLM y supervisor después de construir UI para cablear logs
@@ -108,7 +118,8 @@ class App(tb.Window):
         self._supervisor = Supervisor(app_state=self.mass_state, llm_client=llm_client)
         self._supervisor.stream_events(lambda ev: self._event_queue.put(ev))
         self._load_saved_keys()
-        self._lock_controls(True)
+        self.auth_frame.update_badges(self.mass_state.apis_verified)
+        self._apply_api_locks()
         self.after(250, self._poll_log_queue)
         self.after(250, self._poll_event_queue)
         self.after(4000, self._tick_ui_refresh)
@@ -239,21 +250,15 @@ class App(tb.Window):
             command=self._toggle_min_binance,
         ).grid(row=2, column=2, padx=6, pady=(4,0))
 
-        # API keys
-        frm_api = ttk.Labelframe(right, text="Claves API", padding=8)
-        frm_api.grid(row=2, column=0, sticky="ew", pady=6)
-        frm_api.columnconfigure(1, weight=1)
-        self.var_bin_key = tb.StringVar(value="")
-        self.var_bin_sec = tb.StringVar(value="")
-        ttk.Label(frm_api, text="Binance KEY").grid(row=0, column=0, sticky="w")
-        ttk.Entry(frm_api, textvariable=self.var_bin_key, width=28).grid(row=0, column=1, sticky="ew")
-        ttk.Label(frm_api, text="Binance SECRET").grid(row=1, column=0, sticky="w")
-        ttk.Entry(frm_api, textvariable=self.var_bin_sec, width=28, show="•").grid(row=1, column=1, sticky="ew")
-
-        self.var_oai_key = tb.StringVar(value="")
-        ttk.Label(frm_api, text="ChatGPT API Key").grid(row=2, column=0, sticky="w")
-        ttk.Entry(frm_api, textvariable=self.var_oai_key, width=28, show="•").grid(row=2, column=1, sticky="ew")
-        ttk.Button(frm_api, text="Confirmar APIs", command=self._confirm_apis).grid(row=0, column=2, rowspan=3, padx=6)
+        # API keys and verification badges
+        self.auth_frame = AuthFrame(right, self._start_confirm_apis)
+        self.auth_frame.grid(row=2, column=0, sticky="ew", pady=6)
+        # expose vars for _lock_controls helper
+        self.var_bin_key = self.auth_frame.var_bin_key
+        self.var_bin_sec = self.auth_frame.var_bin_sec
+        self.var_oai_key = self.auth_frame.var_oai_key
+        self.var_codex_key = self.auth_frame.var_codex_key
+        self.var_use_codex = self.auth_frame.var_use_codex
 
         # LLM config minimal: model + seconds + apply button
         frm_llm = ttk.Labelframe(right, text="LLM (decisor)", padding=8)
@@ -268,7 +273,9 @@ class App(tb.Window):
             width=14,
             state="readonly",
         ).grid(row=0, column=1, sticky="ew")
-        ttk.Button(frm_llm, text="Aplicar LLM", command=self._apply_llm).grid(row=0, column=2, padx=6)
+        btn_apply_llm = ttk.Button(frm_llm, text="Aplicar LLM", command=self._apply_llm)
+        btn_apply_llm.grid(row=0, column=2, padx=6)
+        self._codex_buttons.append(btn_apply_llm)
 
         # Consulta LLM
         frm_llm_manual = ttk.Labelframe(right, text="Consulta LLM", padding=8)
@@ -292,8 +299,11 @@ class App(tb.Window):
         ttk.Button(frm_info, text="Aplicar mín. órdenes", command=self._apply_min_orders).grid(
             row=2, column=0, columnspan=2, sticky="ew", pady=(4, 0)
         )
-        ttk.Button(frm_info, text="Revertir patch", command=self._revert_patch).grid(row=3, column=0, sticky="ew", pady=(4,0))
-        ttk.Button(frm_info, text="Aplicar a LIVE", command=self._apply_winner_live).grid(row=3, column=1, sticky="ew", pady=(4,0))
+        btn_revert = ttk.Button(frm_info, text="Revertir patch", command=self._revert_patch)
+        btn_revert.grid(row=3, column=0, sticky="ew", pady=(4,0))
+        btn_live = ttk.Button(frm_info, text="Aplicar a LIVE", command=self._apply_winner_live)
+        btn_live.grid(row=3, column=1, sticky="ew", pady=(4,0))
+        self._codex_buttons.extend([btn_revert, btn_live])
 
         # Log
         frm_log = ttk.Labelframe(right, text="Log", padding=8)
@@ -306,6 +316,7 @@ class App(tb.Window):
         self.var_bot_sim.trace_add("write", self._on_bot_sim)
         self.var_bot_live.trace_add("write", self._on_bot_live)
         self.var_live_confirm.trace_add("write", self._on_live_confirm)
+        self.var_use_codex.trace_add("write", lambda *_: self._apply_api_locks())
 
     # ------------------- Helpers -------------------
     def _ensure_exchange(self):
@@ -320,6 +331,7 @@ class App(tb.Window):
             self.var_bin_key.set(data.get("bin_key", ""))
             self.var_bin_sec.set(data.get("bin_sec", ""))
             self.var_oai_key.set(data.get("oai_key", ""))
+            self.var_codex_key.set(data.get("codex_key", ""))
         except Exception:
             pass
 
@@ -329,18 +341,31 @@ class App(tb.Window):
                 "bin_key": self.var_bin_key.get(),
                 "bin_sec": self.var_bin_sec.get(),
                 "oai_key": self.var_oai_key.get(),
+                "codex_key": self.var_codex_key.get(),
             }
             with open(self._keys_file, "w", encoding="utf-8") as f:
                 json.dump(data, f)
         except Exception:
             pass
 
-    def _confirm_apis(self):
-        """Confirma y guarda las claves API ingresadas en la UI."""
+    def _start_confirm_apis(self) -> None:
+        self._lock_controls(True)
+        threading.Thread(target=lambda: asyncio.run(self._confirm_apis()), daemon=True).start()
+
+    async def _confirm_apis(self) -> None:
+        """Verifica credenciales de Binance, LLM y Codex."""
         self._save_api_keys()
         key = self.var_bin_key.get().strip()
         sec = self.var_bin_sec.get().strip()
         oai = self.var_oai_key.get().strip()
+        codex_key = self.var_codex_key.get().strip()
+        llm_client = MassLLMClient(api_key=oai)
+        codex_client = CodexClient(api_key=codex_key)
+        tasks = [
+            asyncio.to_thread(binance_check.verify, key, sec),
+            asyncio.to_thread(llm_client.check_credentials),
+            asyncio.to_thread(codex_client.check_credentials),
+        ]
         try:
             self._ensure_exchange()
             self.exchange.set_api_keys(key, sec)
@@ -353,8 +378,39 @@ class App(tb.Window):
                     eng.llm.set_api_key(oai)
             except Exception:
                 pass
-        self.log_append("[API] Claves actualizadas")
-        self._lock_controls(False)
+        try:
+            bin_ok, llm_ok, codex_ok = await asyncio.gather(*tasks)
+        except Exception:
+            bin_ok = llm_ok = codex_ok = False
+        self.mass_state.apis_verified = {
+            "binance": bool(bin_ok),
+            "llm": bool(llm_ok),
+            "codex": bool(codex_ok),
+        }
+        self.mass_state.save()
+        self.after(0, lambda: self.auth_frame.update_badges(self.mass_state.apis_verified))
+        self.after(0, lambda: self.log_append("[API] Verificación completada"))
+        self.after(0, self._apply_api_locks)
+
+    def _apply_api_locks(self) -> None:
+        """Habilita o deshabilita controles según verificación de APIs."""
+        bin_ok = self.mass_state.apis_verified.get("binance", False)
+        llm_ok = self.mass_state.apis_verified.get("llm", False)
+        codex_ok = self.mass_state.apis_verified.get("codex", False)
+        self._lock_controls(not (bin_ok and llm_ok))
+        codex_needed = self.var_use_codex.get()
+        for btn in getattr(self, "_codex_buttons", []):
+            try:
+                btn.configure(state="normal")
+            except Exception:
+                pass
+        if codex_needed and not codex_ok:
+            for btn in getattr(self, "_codex_buttons", []):
+                try:
+                    btn.configure(state="disabled")
+                except Exception:
+                    pass
+            self.log_append("[Codex] API inválida")
 
     def _on_engine_snapshot(self, snap: Dict[str, Any]):
         """Callback para recibir snapshots del motor."""
@@ -482,6 +538,14 @@ class App(tb.Window):
         """Inicia o detiene los ciclos de testeos masivos."""
         if running:
             self.log_append("[TEST] Iniciar Testeos presionado")
+            if not (
+                self.mass_state.apis_verified.get("binance")
+                and self.mass_state.apis_verified.get("llm")
+            ):
+                self.log_append("[TEST] APIs no verificadas")
+                self.testeos_frame.btn_toggle.configure(text="Iniciar Testeos", bootstyle=SUCCESS)
+                return
+              
             st = self._supervisor.state
             st.max_depth_symbols = int(params.get("max_depth_symbols", st.max_depth_symbols))
             st.depth_speed = params.get("depth_speed", st.depth_speed)

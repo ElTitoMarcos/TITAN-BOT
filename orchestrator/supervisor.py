@@ -106,6 +106,12 @@ class Supervisor:
         """Inicia el ciclo continuo de testeos en un hilo aparte."""
         if self.mass_tests_enabled:
             return
+        if not (
+            self.state.apis_verified.get("binance")
+            and self.state.apis_verified.get("llm")
+        ):
+            self._emit("ERROR", "auth", None, None, "apis_not_verified", {})
+            return
         self._num_bots = num_bots
         if not self.hub:
             try:
