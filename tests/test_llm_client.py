@@ -68,7 +68,6 @@ def test_new_generation_extracts_json_from_code_block():
     assert res[0]["name"] == "foo"
     assert len(res) == 10
 
-
 def test_new_generation_parses_yaml():
     content = "bots:\n  - name: foo\n    mutations: {}\n"
     client = LLMClient(api_key="")
@@ -88,7 +87,6 @@ def test_new_generation_handles_trailing_commas_and_alias():
     assert res[0]["name"] == "bot_1"
     assert res[0]["mutations"]["order_size_usd"] == 12.7
     assert len(res) == 10
-
 
 def test_pick_meta_winner_extracts_json():
     content = "```json\n{\"bot_id\": 2, \"reason\": \"best pnl\"}\n```"

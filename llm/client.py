@@ -131,6 +131,14 @@ class LLMClient:
         except Exception:
             pass
 
+        if yaml is not None:
+            try:
+                y = yaml.safe_load(txt)
+                if isinstance(y, (list, dict)):
+                    return y
+            except Exception:
+                pass
+
         start = txt.find("[")
         end = txt.rfind("]")
         if start >= 0 and end > start:
