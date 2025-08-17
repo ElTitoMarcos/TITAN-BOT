@@ -57,7 +57,6 @@ def test_pick_meta_winner_extracts_json():
     res = client.pick_meta_winner(winners)
     assert res["bot_id"] == 2
 
-
 def test_local_weighted_fallback_prefers_stability():
     # Without API client, analyze_cycle_and_pick_winner debe usar fallback local
     client = LLMClient(api_key="")
