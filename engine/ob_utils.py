@@ -147,6 +147,13 @@ def queue_ahead_qty(
     return total + qty
 
 
+def best_price(book: Dict[str, List[Tuple[float, float]]], side: str) -> Optional[float]:
+    """Return best price for ``side`` or ``None`` if book is empty."""
+
+    levels = _get_levels(book, "asks" if side == "buy" else "bids")
+    return levels[0][0] if levels else None
+
+
 def estimate_fill_time(
     book: Dict[str, List[Tuple[float, float]]],
     side: str,
@@ -211,4 +218,5 @@ __all__ = [
     "queue_ahead_qty",
     "estimate_fill_time",
     "trade_rate_from_trades",
+    "best_price",
 ]

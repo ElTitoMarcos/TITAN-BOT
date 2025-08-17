@@ -12,7 +12,7 @@ blocking the event loop.
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Tuple, Optional
 
 from exchange_utils.exchange_meta import exchange_meta
 
@@ -125,3 +125,21 @@ def fetch_order_status(
     if last_exc:
         raise last_exc
     raise TimeoutError("fetch_order_status timeout")
+
+
+def parse_fills(order: Dict[str, Any]) -> Tuple[float, float, float, Optional[str]]:
+    """Extract fill quantity, average price and commission from ``order``."""
+
+    filled = float(order.get("filled") or order.get("executedQty") or 0.0)
+    avg = float(order.get("average") or order.get("price") or 0.0)
+    commission = 0.0
+    asset: Optional[str] = None
+    fills = order.get("trades") or order.get("fills") or []
+    for f in fills:
+        commission += float(f.get("commission") or f.get("fee") or f.get("cost") or 0.0)
+        asset = f.get("commissionAsset") or f.get("asset") or f.get("currency") or asset
+    fee = order.get("fee")
+    if isinstance(fee, dict):
+        commission = float(fee.get("cost") or fee.get("commission") or commission)
+        asset = fee.get("currency") or fee.get("asset") or asset
+    return filled, avg, commission, asset

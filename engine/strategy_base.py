@@ -8,31 +8,18 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum, auto
 from .strategy_params import Params
-from .ob_utils import book_hash, compute_imbalance, compute_spread_ticks, try_fill_limit
+from .ob_utils import (
+    book_hash,
+    compute_imbalance,
+    compute_spread_ticks,
+    try_fill_limit,
+    queue_ahead_qty,
+    estimate_fill_time,
+    best_price,
+)
+
 from exchange_utils.exchange_meta import exchange_meta
 from exchange_utils.orderbook_service import MarketDataHub
-
-
-class OrderLifecycle(Enum):
-    """Lifecycle states for a trade."""
-
-    SELECT_PAIR = auto()
-    PREP_BUY = auto()
-    SUBMIT_BUY = auto()
-    MONITOR_BUY = auto()
-    SUBMIT_SELL = auto()
-    MONITOR_SELL = auto()
-    DONE = auto()
-    ABORT = auto()
-
-
-@dataclass
-class OrderOutcome:
-    pnl: float = 0.0
-    pnl_pct: float = 0.0
-    slippage_ticks: int | None = None
-    expected_fill_time_s: float | None = None
-    actual_fill_time_s: float | None = None
 
 
 class OrderLifecycle(Enum):
@@ -134,16 +121,141 @@ class StrategyBase:
         return filled, vwap
 
     async def monitor_buy_live(
-        self, symbol: str, order_id: str, timeout_s: float
-    ) -> Dict[str, Any]:
-        from engine.trade_live import fetch_order_status
+        self,
+        params: Params,
+        symbol: str,
+        order_id: str,
+        price: float,
+        qty: float,
+        tick: float,
+        hub: MarketDataHub,
+    ) -> Optional[Dict[str, Any]]:
+        """Monitor a live buy order applying cancel/replace rules."""
 
-        return await asyncio.to_thread(
-            fetch_order_status, self.exchange, symbol, order_id, timeout_s
-        )
+        from engine.trade_live import cancel_replace, cancel_order, parse_fills
 
-    async def monitor_buy_sim(self, expected_time_s: float) -> float:
-        return expected_time_s
+        start = time.time()
+        moves = 0
+        filled = 0.0
+        avg_price = price
+        commission = 0.0
+        asset: Optional[str] = None
+        events: List[str] = []
+        while True:
+            try:
+                order = await asyncio.to_thread(
+                    self.exchange.fetch_order, order_id, symbol
+                )
+            except Exception:
+                order = {}
+            fqty, favg, fee, asset = parse_fills(order)
+            if fqty > filled:
+                filled = fqty
+                avg_price = favg or avg_price
+                commission += fee
+            status = str(order.get("status", "")).upper()
+            if status == "FILLED" and filled >= qty:
+                return {
+                    "filled_qty": filled,
+                    "avg_price": avg_price,
+                    "commission_paid": commission,
+                    "commission_asset": asset,
+                    "cancel_replace_count": moves,
+                    "monitor_events": events,
+                    "actual_fill_time_s": time.time() - start,
+                }
+            if time.time() - start > params.max_wait_s:
+                if (
+                    params.cancel_replace_rules.enable
+                    and moves < params.cancel_replace_rules.max_moves
+                ):
+                    book = hub.get_order_book(symbol)
+                    best = best_price(book or {}, "buy") or price
+                    new_price = best + tick
+                    remaining = max(qty - filled, 0.0)
+                    try:
+                        _, new_order = await asyncio.to_thread(
+                            cancel_replace,
+                            self.exchange,
+                            symbol,
+                            order_id,
+                            "buy",
+                            new_price,
+                            remaining,
+                        )
+                        order_id = new_order.get("id", order_id)
+                        price = float(new_order.get("price", new_price))
+                        moves += 1
+                        events.append("replace_buy")
+                        start = time.time()
+                        continue
+                    except Exception:
+                        return None
+                try:
+                    await asyncio.to_thread(cancel_order, self.exchange, symbol, order_id)
+                except Exception:
+                    pass
+                events.append("timeout_cancel")
+                return None
+            await asyncio.sleep(1)
+
+    async def monitor_buy_sim(
+        self,
+        params: Params,
+        symbol: str,
+        price: float,
+        qty: float,
+        tick: float,
+        hub: MarketDataHub,
+    ) -> Optional[Dict[str, Any]]:
+        """Simulate buy order monitoring with cancel/replace rules."""
+
+        start = time.time()
+        moves = 0
+        events: List[str] = []
+        filled = 0.0
+        avg_price = price
+        commission = 0.0
+        while True:
+            book = hub.get_order_book(symbol, top=100)
+            trade_rate = hub.get_trade_rate(symbol, price, "buy")
+            est = (
+                estimate_fill_time(book, "buy", price, qty - filled, trade_rate)
+                if book
+                else None
+            )
+            if est:
+                q_ahead, t_est = est
+                if t_est <= params.max_wait_s:
+                    filled_now, vwap = try_fill_limit(book, "buy", price, qty - filled)
+                    if filled_now > 0:
+                        filled += filled_now
+                        avg_price = vwap or avg_price
+                        commission = 0.0
+                    if filled >= qty:
+                        return {
+                            "filled_qty": filled,
+                            "avg_price": avg_price,
+                            "commission_paid": commission,
+                            "commission_asset": None,
+                            "cancel_replace_count": moves,
+                            "monitor_events": events,
+                            "actual_fill_time_s": time.time() - start,
+                        }
+            if time.time() - start > params.max_wait_s:
+                if (
+                    params.cancel_replace_rules.enable
+                    and moves < params.cancel_replace_rules.max_moves
+                ):
+                    best = best_price(book or {}, "buy") or price
+                    price = best + tick
+                    moves += 1
+                    events.append("replace_buy")
+                    start = time.time()
+                    continue
+                events.append("timeout_cancel")
+                return None
+            await asyncio.sleep(1)
 
     async def submit_sell_live(self, symbol: str, price: float, qty: float) -> Dict[str, Any]:
         from engine.trade_live import place_limit
@@ -157,16 +269,142 @@ class StrategyBase:
         return filled, vwap
 
     async def monitor_sell_live(
-        self, symbol: str, order_id: str, timeout_s: float
-    ) -> Dict[str, Any]:
-        from engine.trade_live import fetch_order_status
+        self,
+        params: Params,
+        symbol: str,
+        order_id: str,
+        price: float,
+        qty: float,
+        tick: float,
+        hub: MarketDataHub,
+        min_price: float,
+    ) -> Optional[Dict[str, Any]]:
+        """Monitor a live sell order applying cancel/replace rules."""
 
-        return await asyncio.to_thread(
-            fetch_order_status, self.exchange, symbol, order_id, timeout_s
-        )
+        from engine.trade_live import cancel_replace, cancel_order, parse_fills
 
-    async def monitor_sell_sim(self, expected_time_s: float) -> float:
-        return expected_time_s
+        start = time.time()
+        moves = 0
+        filled = 0.0
+        avg_price = price
+        commission = 0.0
+        asset: Optional[str] = None
+        events: List[str] = []
+        while True:
+            try:
+                order = await asyncio.to_thread(
+                    self.exchange.fetch_order, order_id, symbol
+                )
+            except Exception:
+                order = {}
+            fqty, favg, fee, asset = parse_fills(order)
+            if fqty > filled:
+                filled = fqty
+                avg_price = favg or avg_price
+                commission += fee
+            status = str(order.get("status", "")).upper()
+            if status == "FILLED" and filled >= qty:
+                return {
+                    "filled_qty": filled,
+                    "avg_price": avg_price,
+                    "commission_paid": commission,
+                    "commission_asset": asset,
+                    "cancel_replace_count": moves,
+                    "monitor_events": events,
+                    "actual_fill_time_s": time.time() - start,
+                }
+            if time.time() - start > params.max_wait_s:
+                if (
+                    params.cancel_replace_rules.enable
+                    and moves < params.cancel_replace_rules.max_moves
+                ):
+                    book = hub.get_order_book(symbol)
+                    best = best_price(book or {}, "sell") or price
+                    new_price = max(best - tick, min_price)
+                    remaining = max(qty - filled, 0.0)
+                    try:
+                        _, new_order = await asyncio.to_thread(
+                            cancel_replace,
+                            self.exchange,
+                            symbol,
+                            order_id,
+                            "sell",
+                            new_price,
+                            remaining,
+                        )
+                        order_id = new_order.get("id", order_id)
+                        price = float(new_order.get("price", new_price))
+                        moves += 1
+                        events.append("replace_sell")
+                        start = time.time()
+                        continue
+                    except Exception:
+                        return None
+                try:
+                    await asyncio.to_thread(cancel_order, self.exchange, symbol, order_id)
+                except Exception:
+                    pass
+                events.append("timeout_cancel")
+                return None
+            await asyncio.sleep(1)
+
+    async def monitor_sell_sim(
+        self,
+        params: Params,
+        symbol: str,
+        price: float,
+        qty: float,
+        tick: float,
+        hub: MarketDataHub,
+        min_price: float,
+    ) -> Optional[Dict[str, Any]]:
+        """Simulate sell order monitoring with cancel/replace rules."""
+
+        start = time.time()
+        moves = 0
+        events: List[str] = []
+        filled = 0.0
+        avg_price = price
+        commission = 0.0
+        while True:
+            book = hub.get_order_book(symbol, top=100)
+            trade_rate = hub.get_trade_rate(symbol, price, "sell")
+            est = (
+                estimate_fill_time(book, "sell", price, qty - filled, trade_rate)
+                if book
+                else None
+            )
+            if est:
+                q_ahead, t_est = est
+                if t_est <= params.max_wait_s:
+                    filled_now, vwap = try_fill_limit(book, "sell", price, qty - filled)
+                    if filled_now > 0:
+                        filled += filled_now
+                        avg_price = vwap or avg_price
+                    if filled >= qty:
+                        return {
+                            "filled_qty": filled,
+                            "avg_price": avg_price,
+                            "commission_paid": commission,
+                            "commission_asset": None,
+                            "cancel_replace_count": moves,
+                            "monitor_events": events,
+                            "actual_fill_time_s": time.time() - start,
+                        }
+            if time.time() - start > params.max_wait_s:
+                if (
+                    params.cancel_replace_rules.enable
+                    and moves < params.cancel_replace_rules.max_moves
+                ):
+                    best = best_price(book or {}, "sell") or price
+                    price = max(best - tick, min_price)
+                    moves += 1
+                    events.append("replace_sell")
+                    start = time.time()
+                    continue
+                events.append("timeout_cancel")
+                return None
+            await asyncio.sleep(1)
 
     async def analyze_book(
         self, params: Params, symbol: str, book: Dict[str, Any], mode: str = "SIM"
