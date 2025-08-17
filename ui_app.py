@@ -107,7 +107,12 @@ class App(tb.Window):
         self._build_ui()
         # Instanciar LLM y supervisor después de construir UI para cablear logs
         llm_client = MassLLMClient(on_log=self.info_frame.append_llm_log)
-        self._supervisor = Supervisor(app_state=self.mass_state, llm_client=llm_client)
+        self._supervisor = Supervisor(
+            app_state=self.mass_state,
+            llm_client=llm_client,
+            min_orders=int(self.var_min_orders.get()),
+        )
+
         self._supervisor.stream_events(lambda ev: self._event_queue.put(ev))
         self._load_saved_keys()
         self.auth_frame.update_badges(self.mass_state.apis_verified)
@@ -286,6 +291,13 @@ class App(tb.Window):
         )
         self.info_frame.grid(row=5, column=0, sticky="nsew", pady=(6, 0))
 
+        # Log
+        frm_log = ttk.Labelframe(right, text="Log", padding=8)
+        frm_log.grid(row=6, column=0, sticky="nsew", pady=6)
+        frm_log.rowconfigure(0, weight=1); frm_log.columnconfigure(0, weight=1)
+        self.txt_log = ScrolledText(frm_log, height=6, autohide=True, wrap="none")
+        self.txt_log.grid(row=0, column=0, sticky="nsew")
+
         # Bindings
         self.var_bot_sim.trace_add("write", self._on_bot_sim)
         self.var_bot_live.trace_add("write", self._on_bot_live)
@@ -417,7 +429,7 @@ class App(tb.Window):
                     eng.llm.set_model(model)
             except Exception:
                 pass
-        self.log_append(f"[LLM] Modelo aplicado: {model}")
+        self.info_frame.append_llm_log("config", {"model": model})
 
     def _send_llm_query(self):
         query = self.var_llm_query.get().strip()
@@ -490,6 +502,7 @@ class App(tb.Window):
         """Aplica el mínimo de órdenes requerido para la sesión de test."""
         try:
             val = int(self.var_min_orders.get())
+            self._supervisor.set_min_orders(val)
             self.log_append(f"[TEST] Órdenes mínimas = {val}")
         except Exception:
             self.log_append("[TEST] Valor inválido para órdenes mínimas")
@@ -537,7 +550,20 @@ class App(tb.Window):
 
     # ------------------- Log helpers -------------------
     def log_append(self, msg: str):
-        pass
+        if msg.startswith("[LLM]"):
+            self.info_frame.append_llm_log("info", msg[5:].strip())
+        else:
+            self._log_queue.put(msg)
+
+    def _poll_log_queue(self):
+        try:
+            while True:
+                msg = self._log_queue.get_nowait()
+                self.txt_log.insert("end", msg + "\n")
+                self.txt_log.see("end")
+        except queue.Empty:
+            pass
+        self.after(200, self._poll_log_queue)
 
     def _poll_event_queue(self):
         try:
@@ -606,6 +632,10 @@ class App(tb.Window):
             else: self.lbl_pnl.configure(bootstyle=DANGER)
         except Exception:
             pass
+
+        reasons = snap.get("reasons", [])
+        for r in reasons:
+            self.log_append(f"[ENGINE] {r}")
 
         self.after(4000, self._tick_ui_refresh)
 
