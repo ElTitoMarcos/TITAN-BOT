@@ -56,3 +56,36 @@ def test_pick_meta_winner_extracts_json():
     ]
     res = client.pick_meta_winner(winners)
     assert res["bot_id"] == 2
+
+def test_local_weighted_fallback_prefers_stability():
+    # Without API client, analyze_cycle_and_pick_winner debe usar fallback local
+    client = LLMClient(api_key="")
+    client._client = None
+    summary = {
+        "bots": [
+            {
+                "bot_id": 1,
+                "stats": {
+                    "pnl": 100,
+                    "win_rate": 0.5,
+                    "avg_hold_s": 10,
+                    "avg_slippage_ticks": 5,
+                    "timeouts": 10,
+                    "cancel_replace_count": 5,
+                },
+            },
+            {
+                "bot_id": 2,
+                "stats": {
+                    "pnl": 90,
+                    "win_rate": 0.5,
+                    "avg_hold_s": 10,
+                    "avg_slippage_ticks": 0,
+                    "timeouts": 0,
+                    "cancel_replace_count": 1,
+                },
+            },
+        ]
+    }
+    decision = client.analyze_cycle_and_pick_winner(summary)
+    assert decision["winner_bot_id"] == 2
