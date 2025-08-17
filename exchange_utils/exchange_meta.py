@@ -76,5 +76,4 @@ class ExchangeMeta:
             raise ValueError("notional below minNotional")
         return price, qty, filters
 
-
 exchange_meta = ExchangeMeta()

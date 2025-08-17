@@ -27,6 +27,7 @@ class BotRunner:
         ui_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
         hub: MarketDataHub = market_data_hub,
         mode: str = "SIM",
+
     ) -> None:
         self.config = config
         self.limits = limits
@@ -76,6 +77,7 @@ class BotRunner:
                 buy_data = await self.strategy.analyze_book(
                     params, sym, book, mode=self.mode
                 )
+
                 if not buy_data:
                     continue
 
