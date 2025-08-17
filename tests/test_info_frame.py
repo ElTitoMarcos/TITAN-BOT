@@ -27,11 +27,10 @@ def test_logging_and_controls():
     frame._process_log_queue()
 
     text = frame.txt_logs.get("1.0", "end")
-    assert 'Envío LLM: Prompt "Variaciones Iniciales"' in text
-    assert 'Respuesta LLM:' in text
-    assert ', , ,' not in text
-    assert '[], [], []' not in text
-    assert 'Envío LLM: adhoc' in text
+    assert "Prompt: Variaciones Iniciales | Resp: respuesta" in text
+    assert ", , ," not in text
+    assert "[], [], []" not in text
+    assert "adhoc" not in text
 
     frame.toggle_pause()
     frame.append_llm_log("response", "otra")
@@ -39,12 +38,38 @@ def test_logging_and_controls():
     assert text == frame.txt_logs.get("1.0", "end")
 
     frame.toggle_pause()
+    frame._process_log_queue()
     frame.append_llm_log("response", "nuevo")
     frame._process_log_queue()
-    assert 'nuevo' in frame.txt_logs.get("1.0", "end")
+    logs = frame.txt_logs.get("1.0", "end")
+    assert "Prompt: adhoc | Resp: otra" in logs
+    assert "Resp: nuevo" in logs
 
     frame.clear_logs()
     assert frame.txt_logs.get("1.0", "end").strip() == ""
+
+    root.destroy()
+
+
+@pytest.mark.skipif(os.environ.get("DISPLAY", "") == "", reason="requires display")
+def test_truncation():
+    root = tk.Tk()
+    root.withdraw()
+
+    var = tk.IntVar()
+    frame = InfoFrame(root, var, _dummy, _dummy, _dummy, _dummy)
+
+    long_prompt = "p" * 100
+    long_resp = "r" * 200
+
+    frame.append_llm_log("request", long_prompt)
+    frame.append_llm_log("response", long_resp)
+    frame._process_log_queue()
+
+    text = frame.txt_logs.get("1.0", "end").strip()
+    assert len(text) == len("Prompt: ") + 80 + len(" | Resp: ") + 120
+    assert "p" * 80 in text
+    assert "r" * 120 in text
 
     root.destroy()
 
