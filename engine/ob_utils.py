@@ -147,6 +147,13 @@ def queue_ahead_qty(
     return total + qty
 
 
+def best_price(book: Dict[str, List[Tuple[float, float]]], side: str) -> Optional[float]:
+    """Return best price for ``side`` or ``None`` if book is empty."""
+
+    levels = _get_levels(book, "asks" if side == "buy" else "bids")
+    return levels[0][0] if levels else None
+
+
 def estimate_fill_time(
     book: Dict[str, List[Tuple[float, float]]],
     side: str,
@@ -179,6 +186,30 @@ def estimate_fill_time(
     return queue_qty, t_est
 
 
+def trade_rate_from_trades(
+    trades: Iterable[Tuple[float, float]],
+    side: str,
+    price: float,
+    lookback_s: int,
+) -> Optional[float]:
+    """Compute trade rate from a list of trades.
+
+    ``trades`` is an iterable of ``(price, qty)`` tuples. The function sums
+    quantities traded at ``price`` or better for the given ``side`` and divides
+    by ``lookback_s`` to express the result in ``qty/s``.
+    """
+
+    qty = 0.0
+    for p, q in trades:
+        if side.lower() == "buy" and p <= price:
+            qty += q
+        elif side.lower() == "sell" and p >= price:
+            qty += q
+    if qty == 0:
+        return None
+    return qty / float(lookback_s)
+
+
 __all__ = [
     "try_fill_limit",
     "compute_imbalance",
@@ -186,4 +217,6 @@ __all__ = [
     "book_hash",
     "queue_ahead_qty",
     "estimate_fill_time",
+    "trade_rate_from_trades",
+    "best_price",
 ]
