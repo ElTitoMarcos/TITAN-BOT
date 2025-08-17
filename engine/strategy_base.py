@@ -38,7 +38,6 @@ class StrategyBase:
 
     async def analyze_book(
         self, params: Params, symbol: str, book: Dict[str, Any], mode: str = "SIM"
-
     ) -> Optional[Dict[str, Any]]:
         """Evaluate order book and return buy order data if conditions met.
 

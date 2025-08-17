@@ -18,7 +18,7 @@ class MarketDataHub:
     """Servicio que mantiene libros de órdenes usando snapshot + diffs."""
 
     def __init__(self, max_depth_symbols: int = 20) -> None:
-      
+
         self._lock = threading.RLock()
         self._books: Dict[str, Dict[str, Any]] = {}
         self._streams: Dict[str, str] = {}

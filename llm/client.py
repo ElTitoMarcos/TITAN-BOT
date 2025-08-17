@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Callable, Any
 import hashlib
 
 from .prompts import (
@@ -20,9 +20,15 @@ class LLMClient:
     determinista de 10 variaciones válidas.
     """
 
-    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o-mini") -> None:
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        model: str = "gpt-4o-mini",
+        on_log: Optional[Callable[[str, Any], None]] = None,
+    ) -> None:
         self.api_key = api_key or os.getenv("OPENAI_API_KEY", "")
         self.model = model
+        self.on_log = on_log
         self._client = None
         if self.api_key:
             try:  # Lazy import para no requerir dependencia siempre
@@ -33,23 +39,38 @@ class LLMClient:
                 self._client = None
 
     # ------------------------------------------------------------------
+    def _log(self, tag: str, payload: Any) -> None:
+        if self.on_log:
+            try:
+                self.on_log(tag, payload)
+            except Exception:
+                pass
+
+    # ------------------------------------------------------------------
     def _call_openai(self, trading_spec_text: str) -> List[Dict[str, object]]:
         assert self._client is not None
-        resp = self._client.chat.completions.create(
-            model=self.model,
-            temperature=0.2,
-            messages=[
-                {"role": "system", "content": PROMPT_P0},
-                {"role": "system", "content": PROMPT_INICIAL_VARIACIONES},
-                {"role": "user", "content": trading_spec_text},
-            ],
-            timeout=40,
-        )
-        txt = resp.choices[0].message.content or "[]"
-        data = json.loads(txt)
-        if not isinstance(data, list):
-            raise ValueError("respuesta no es lista")
-        return data
+        messages = [
+            {"role": "system", "content": PROMPT_P0},
+            {"role": "system", "content": PROMPT_INICIAL_VARIACIONES},
+            {"role": "user", "content": trading_spec_text},
+        ]
+        self._log("request", {"model": self.model, "messages": messages})
+        try:
+            resp = self._client.chat.completions.create(
+                model=self.model,
+                temperature=0.2,
+                messages=messages,
+                timeout=40,
+            )
+            txt = resp.choices[0].message.content or "[]"
+            self._log("response", txt)
+            data = json.loads(txt)
+            if not isinstance(data, list):
+                raise ValueError("respuesta no es lista")
+            return data
+        except Exception as e:
+            self._log("response", {"error": str(e)})
+            raise
 
     # ------------------------------------------------------------------
     def _fallback_variations(self) -> List[Dict[str, object]]:
@@ -177,25 +198,29 @@ class LLMClient:
             prompt = PROMPT_NUEVA_GENERACION_DESDE_GANADOR.replace(
                 "<PEGAR_JSON_WINNER>", json.dumps(winner_mutations, ensure_ascii=False)
             )
+            messages = [
+                {"role": "system", "content": PROMPT_P0},
+                {"role": "system", "content": prompt},
+                {
+                    "role": "user",
+                    "content": json.dumps({"history_fingerprints": history_fingerprints}),
+                },
+            ]
+            self._log("request", {"model": self.model, "messages": messages})
             try:
                 resp = self._client.chat.completions.create(
                     model=self.model,
                     temperature=0.2,
-                    messages=[
-                        {"role": "system", "content": PROMPT_P0},
-                        {"role": "system", "content": prompt},
-                        {
-                            "role": "user",
-                            "content": json.dumps({"history_fingerprints": history_fingerprints}),
-                        },
-                    ],
+                    messages=messages,
                     timeout=40,
                 )
                 txt = resp.choices[0].message.content or "[]"
+                self._log("response", txt)
                 raw = json.loads(txt)
                 if not isinstance(raw, list):
                     raw = []
-            except Exception:
+            except Exception as e:
+                self._log("response", {"error": str(e)})
                 raw = []
         if not raw:
             raw = self._fallback_new_generation(winner_mutations, history_fingerprints)
@@ -236,26 +261,29 @@ class LLMClient:
         """
 
         if self._client is not None:
+            messages = [
+                {"role": "system", "content": PROMPT_P0},
+                {"role": "system", "content": PROMPT_ANALISIS_CICLO},
+                {"role": "user", "content": json.dumps(cycle_summary)},
+            ]
+            self._log("request", {"model": self.model, "messages": messages})
             try:
                 resp = self._client.chat.completions.create(
                     model=self.model,
                     temperature=0,
-                    messages=[
-                        {"role": "system", "content": PROMPT_P0},
-                        {"role": "system", "content": PROMPT_ANALISIS_CICLO},
-                        {"role": "user", "content": json.dumps(cycle_summary)},
-                    ],
+                    messages=messages,
                     timeout=40,
                 )
                 txt = resp.choices[0].message.content or "{}"
+                self._log("response", txt)
                 data = json.loads(txt)
                 if isinstance(data, dict) and "winner_bot_id" in data:
                     return {
                         "winner_bot_id": int(data["winner_bot_id"]),
                         "reason": str(data.get("reason", "")),
                     }
-            except Exception:
-                pass
+            except Exception as e:
+                self._log("response", {"error": str(e)})
         return self._fallback_winner(cycle_summary)
 
     # ------------------------------------------------------------------

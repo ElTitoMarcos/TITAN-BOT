@@ -94,10 +94,6 @@ class App(tb.Window):
         self._snapshot: Dict[str, Any] = {}
         self._log_queue: "queue.Queue[str]" = queue.Queue()
         self._event_queue: "queue.Queue" = queue.Queue()
-        self._supervisor = Supervisor(
-            app_state=self.mass_state, llm_client=MassLLMClient()
-        )
-        self._supervisor.stream_events(lambda ev: self._event_queue.put(ev))
         self._engine_sim: Engine | None = None
         self._engine_live: Engine | None = None
         self.exchange = None
@@ -108,6 +104,10 @@ class App(tb.Window):
         self._keys_file = os.path.join(os.path.dirname(__file__), ".api_keys.json")
 
         self._build_ui()
+        # Instanciar LLM y supervisor después de construir UI para cablear logs
+        llm_client = MassLLMClient(on_log=self.testeos_frame.append_llm_log)
+        self._supervisor = Supervisor(app_state=self.mass_state, llm_client=llm_client)
+        self._supervisor.stream_events(lambda ev: self._event_queue.put(ev))
         self._load_saved_keys()
         self._lock_controls(True)
         self.after(250, self._poll_log_queue)
