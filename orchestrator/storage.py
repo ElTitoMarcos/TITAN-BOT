@@ -470,6 +470,7 @@ class SQLiteStorage:
         return summary
 
     # ------------------------------------------------------------------
+
     def close(self) -> None:
         with self._lock:
             self.conn.close()
