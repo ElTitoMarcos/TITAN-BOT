@@ -44,3 +44,15 @@ def test_new_generation_extracts_json_from_code_block():
     res = client.new_generation_from_winner({}, [])
     assert res[0]["name"] == "foo"
     assert len(res) == 10
+
+
+def test_pick_meta_winner_extracts_json():
+    content = "```json\n{\"bot_id\": 2, \"reason\": \"best pnl\"}\n```"
+    client = LLMClient(api_key="")
+    client._client = DummyClient(content)
+    winners = [
+        {"cycle": 1, "bot_id": 1, "mutations": {}, "stats": {"pnl": 1}},
+        {"cycle": 2, "bot_id": 2, "mutations": {}, "stats": {"pnl": 2}},
+    ]
+    res = client.pick_meta_winner(winners)
+    assert res["bot_id"] == 2

@@ -356,6 +356,42 @@ class SQLiteStorage:
         return dict(row)
 
     # ------------------------------------------------------------------
+    def list_winners(self) -> List[Dict[str, Any]]:
+        """Return historical cycle winners with their mutations and stats."""
+        query = """
+            SELECT c.cycle_id, c.winner_bot_id, b.mutations_json,
+                   s.orders, s.pnl, s.pnl_pct, s.runtime_s, s.wins, s.losses
+            FROM cycles c
+            JOIN bots b ON c.winner_bot_id = b.bot_id
+            LEFT JOIN bot_stats s ON s.bot_id = c.winner_bot_id AND s.cycle_id = c.cycle_id
+            WHERE c.winner_bot_id IS NOT NULL
+            ORDER BY c.cycle_id
+        """
+        with self._lock:
+            rows = self.conn.execute(query).fetchall()
+        winners: List[Dict[str, Any]] = []
+        for r in rows:
+            stats = None
+            if r["orders"] is not None:
+                stats = {
+                    "orders": r["orders"],
+                    "pnl": r["pnl"],
+                    "pnl_pct": r["pnl_pct"],
+                    "runtime_s": r["runtime_s"],
+                    "wins": r["wins"],
+                    "losses": r["losses"],
+                }
+            winners.append(
+                {
+                    "cycle": r["cycle_id"],
+                    "bot_id": r["winner_bot_id"],
+                    "mutations": json.loads(r["mutations_json"]) if r["mutations_json"] else {},
+                    "stats": stats,
+                }
+            )
+        return winners
+
+    # ------------------------------------------------------------------
     def close(self) -> None:
         with self._lock:
             self.conn.close()

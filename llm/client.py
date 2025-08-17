@@ -11,6 +11,7 @@ from .prompts import (
     PROMPT_ANALISIS_CICLO,
     PROMPT_NUEVA_GENERACION_DESDE_GANADOR,
     PROMPT_P0,
+    PROMPT_META_GANADOR,
 )
 
 class LLMClient:
@@ -369,6 +370,55 @@ class LLMClient:
             except Exception as e:
                 self._log("response", {"error": str(e)})
         return self._fallback_winner(cycle_summary)
+
+    # ------------------------------------------------------------------
+    def pick_meta_winner(self, winners: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Elige un meta-ganador entre ganadores históricos."""
+        if self._client is not None:
+            messages = [
+                {"role": "system", "content": PROMPT_P0},
+                {"role": "system", "content": PROMPT_META_GANADOR},
+                {"role": "user", "content": json.dumps(winners)},
+            ]
+            self._log("request", {"model": self.model, "messages": messages})
+            try:
+                resp = self._client.chat.completions.create(
+                    model=self.model,
+                    temperature=0,
+                    messages=messages,
+                    timeout=40,
+                )
+                raw_txt = resp.choices[0].message.content or "{}"
+                self._log("response", raw_txt)
+                data = self._extract_json(raw_txt)
+                if isinstance(data, dict) and "bot_id" in data:
+                    return {
+                        "bot_id": int(data.get("bot_id", -1)),
+                        "reason": str(data.get("reason", "")),
+                    }
+                self._log("response", {"error": "no json object", "raw": raw_txt})
+            except Exception as e:
+                self._log("response", {"error": str(e)})
+        return self._fallback_meta_winner(winners)
+
+    def _fallback_meta_winner(self, winners: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Fallback determinista: selecciona el ganador con mayor PnL."""
+        best = None
+        best_pnl = float("-inf")
+        for w in winners:
+            try:
+                pnl = float(w.get("stats", {}).get("pnl", float("-inf")))
+            except Exception:
+                pnl = float("-inf")
+            if pnl > best_pnl:
+                best_pnl = pnl
+                best = w
+        if best:
+            return {
+                "bot_id": int(best.get("bot_id", -1)),
+                "reason": "max_pnl",
+            }
+        return {"bot_id": -1, "reason": "no_winners"}
 
     # ------------------------------------------------------------------
     def _fallback_winner(self, cycle_summary: Dict[str, object]) -> Dict[str, object]:
