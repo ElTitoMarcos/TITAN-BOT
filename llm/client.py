@@ -39,6 +39,33 @@ class LLMClient:
                 self._client = None
 
     # ------------------------------------------------------------------
+    def check_credentials(self) -> bool:
+        """Verifies that the configured API key is valid.
+
+        It performs a minimal request to the OpenAI API. Any network or
+        authentication error results in ``False`` so callers can decide how to
+        handle unavailable credentials without raising exceptions.
+        """
+        if not self.api_key:
+            self._client = None
+            return False
+        try:
+            import requests
+
+            resp = requests.get(
+                "https://api.openai.com/v1/models",
+                headers={"Authorization": f"Bearer {self.api_key}"},
+                timeout=5,
+            )
+            if resp.status_code == 200:
+                return True
+            self._client = None
+            return False
+        except Exception:
+            self._client = None
+            return False
+
+    # ------------------------------------------------------------------
     def _log(self, tag: str, payload: Any) -> None:
         if self.on_log:
             try:
@@ -106,7 +133,7 @@ class LLMClient:
     def generate_initial_variations(self, trading_spec_text: str) -> List[Dict[str, object]]:
         """Obtiene 10 variaciones únicas de la estrategia base."""
         raw: List[Dict[str, object]] = []
-        if self._client is not None:
+        if self._client is not None and self.check_credentials():
             try:
                 raw = self._call_openai(trading_spec_text)
             except Exception:

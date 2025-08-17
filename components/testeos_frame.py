@@ -13,7 +13,7 @@ class TesteosFrame(ttk.Frame):
     def __init__(
         self,
         parent: ttk.Widget,
-        on_toggle: Callable[[bool], None],
+        on_toggle: Callable[[bool, Dict[str, Any]], None],
         on_load_winner_for_sim: Callable[[], None],
     ) -> None:
         super().__init__(parent, padding=10)
@@ -32,13 +32,44 @@ class TesteosFrame(ttk.Frame):
         self.rowconfigure(4, weight=1)
         self.rowconfigure(5, weight=1)
 
+        self.var_num_bots = tk.IntVar(value=10)
+        self.var_max_depth = tk.IntVar(value=20)
+        self.var_depth_speed = tk.StringVar(value="100ms")
+        self.var_mode = tk.StringVar(value="SIM")
+
+        top = ttk.Frame(self)
+        top.grid(row=0, column=0, sticky="w")
         self.btn_toggle = ttk.Button(
-            self,
+            top,
             text="Iniciar Testeos",
             bootstyle=SUCCESS,
             command=self._toggle,
         )
-        self.btn_toggle.grid(row=0, column=0, sticky="w")
+        self.btn_toggle.grid(row=0, column=0, padx=(0, 8))
+        ttk.Label(top, text="Bots:").grid(row=0, column=1, padx=(0, 2))
+        ttk.Spinbox(top, from_=1, to=50, width=5, textvariable=self.var_num_bots).grid(
+            row=0, column=2, padx=(0, 8)
+        )
+        ttk.Label(top, text="MAX_DEPTH:").grid(row=0, column=3, padx=(0, 2))
+        ttk.Spinbox(top, from_=1, to=50, width=5, textvariable=self.var_max_depth).grid(
+            row=0, column=4, padx=(0, 8)
+        )
+        ttk.Label(top, text="Speed:").grid(row=0, column=5, padx=(0, 2))
+        ttk.Combobox(
+            top,
+            values=["100ms", "1000ms"],
+            width=7,
+            state="readonly",
+            textvariable=self.var_depth_speed,
+        ).grid(row=0, column=6, padx=(0, 8))
+        ttk.Label(top, text="Modo:").grid(row=0, column=7, padx=(0, 2))
+        ttk.Combobox(
+            top,
+            values=["SIM", "LIVE"],
+            width=5,
+            state="readonly",
+            textvariable=self.var_mode,
+        ).grid(row=0, column=8)
 
         cols = ("bot_id", "cycle", "orders", "pnl", "status", "winner")
         self.tree = ttk.Treeview(self, columns=cols, show="headings", height=10)
@@ -110,7 +141,7 @@ class TesteosFrame(ttk.Frame):
         else:
             self.btn_toggle.configure(text="Iniciar Testeos", bootstyle=SUCCESS)
         try:
-            self._on_toggle(self._running)
+            self._on_toggle(self._running, self.get_params())
         except Exception:
             pass
 
@@ -201,3 +232,12 @@ class TesteosFrame(ttk.Frame):
         self.txt_logs.configure(state="normal")
         self.txt_logs.delete("1.0", "end")
         self.txt_logs.configure(state="disabled")
+
+    def get_params(self) -> Dict[str, Any]:
+        """Retorna la configuración actual de los controles."""
+        return {
+            "num_bots": self.var_num_bots.get(),
+            "max_depth_symbols": self.var_max_depth.get(),
+            "depth_speed": self.var_depth_speed.get(),
+            "mode": self.var_mode.get(),
+        }
