@@ -71,7 +71,22 @@ class StrategyBase:
 
         info = await self.exchange.get_market(symbol)
         tick = float(info.get("price_increment", 1e-8))
-        raw_amount = params.order_size_usd / ask_price if ask_price else 0.0
+
+        # Enforce exchange minNotional on ``order_size_usd``
+        filters = exchange_meta.get_symbol_filters(symbol)
+        min_notional = float(filters.get("minNotional", 0.0))
+        min_usd = 0.0
+        if min_notional:
+            quote = info.get("quote") or (symbol[-4:] if symbol.upper().endswith("USDT") else symbol[-3:])
+            if hasattr(self.exchange, "_quote_to_usd"):
+                try:
+                    px = self.exchange._quote_to_usd(quote)
+                    min_usd = min_notional * float(px)
+                except Exception:
+                    min_usd = 0.0
+        effective_usd = max(params.order_size_usd, min_usd + params.min_notional_margin)
+
+        raw_amount = effective_usd / ask_price if ask_price else 0.0
         if mode.upper() == "LIVE":
             try:
                 ask_price, amount, filters = exchange_meta.round_price_qty(

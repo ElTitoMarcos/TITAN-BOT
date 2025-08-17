@@ -20,6 +20,18 @@ class AppState:
     apis_verified: Dict[str, bool] = field(
         default_factory=lambda: {"binance": False, "llm": False}
     )
+    metric_weights: Dict[str, float] = field(
+        default_factory=lambda: {
+            "pnl": 0.35,
+            "timeouts": 0.25,
+            "slippage": 0.2,
+            "win_rate": 0.1,
+            "avg_hold_s": 0.06,
+            "cancel_replace_count": 0.04,
+        }
+    )
+    order_size_usd: float = 50.0
+    order_size_mode: str = "Fijo"
     _file: str = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
