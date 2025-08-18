@@ -132,12 +132,16 @@ class LLMClient:
             pass
 
         if yaml is not None:
-            try:
-                y = yaml.safe_load(txt)
-                if isinstance(y, (list, dict)):
-                    return y
-            except Exception:
-                pass
+            for candidate in (
+                re.sub(r",\s*(\n|$)", r"\1", txt),
+                txt,
+            ):
+                try:
+                    y = yaml.safe_load(candidate)
+                    if isinstance(y, (list, dict)):
+                        return y
+                except Exception:
+                    continue
 
         start = txt.find("[")
         end = txt.rfind("]")
@@ -147,14 +151,6 @@ class LLMClient:
             except Exception:
                 pass
 
-        if yaml is not None:
-            for candidate in (re.sub(r",\s*(\n|$)", r"\1", txt), txt):
-                try:
-                    y = yaml.safe_load(candidate)
-                    if isinstance(y, (list, dict)):
-                        return y
-                except Exception:
-                    continue
 
         start = txt.find("{")
         end = txt.rfind("}")
