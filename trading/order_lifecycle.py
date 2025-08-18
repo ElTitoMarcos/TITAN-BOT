@@ -112,7 +112,14 @@ class OrderLifecycle:
                 "filled": 0.0,
             }
         self.current_order = order
-        log_event({"event": "order_opened", "symbol": symbol, "side": side, "price": price, "qty": qty})
+        log_event({
+            "event": "order_opened",
+            "symbol": symbol,
+            "side": side,
+            "price": price,
+            "qty": qty,
+            "mode": use_mode,
+        })
         if self.on_order_opened:
             self.on_order_opened(order)
         return order
@@ -127,6 +134,7 @@ class OrderLifecycle:
         """Poll ``order`` until completion, delegating to mode specific fillers."""
 
         filler = self._resolve_mode(mode)
+        use_mode = self._mode_of(filler)
         symbol = order.get("symbol")
         order_id = order.get("id")
         last_qty = float(order.get("filled") or 0.0)
@@ -136,17 +144,34 @@ class OrderLifecycle:
             status = str(order.get("status", "")).upper()
             if evt or (filled > last_qty and status not in {"FILLED", "CANCELED"}):
                 last_qty = filled
-                log_event({"event": "order_partial", "symbol": symbol, "order_id": order_id, "qty": filled})
+                log_event({
+                    "event": "order_partial",
+                    "symbol": symbol,
+                    "order_id": order_id,
+                    "qty": filled,
+                    "mode": use_mode,
+                })
                 if self.on_partial_fill:
                     self.on_partial_fill(order)
             if status == "FILLED":
-                log_event({"event": "order_filled", "symbol": symbol, "order_id": order_id, "qty": filled})
+                log_event({
+                    "event": "order_filled",
+                    "symbol": symbol,
+                    "order_id": order_id,
+                    "qty": filled,
+                    "mode": use_mode,
+                })
                 if self.on_filled:
                     self.on_filled(order)
                 self.current_order = None
                 return
             if status == "CANCELED":
-                log_event({"event": "order_canceled", "symbol": symbol, "order_id": order_id})
+                log_event({
+                    "event": "order_canceled",
+                    "symbol": symbol,
+                    "order_id": order_id,
+                    "mode": use_mode,
+                })
                 if self.on_canceled:
                     self.on_canceled(order)
                 self.current_order = None
@@ -167,7 +192,12 @@ class OrderLifecycle:
             if self.mode == "LIVE":
                 result = self.exchange.cancel_order(order_id, symbol)
             order["status"] = "CANCELED"
-            log_event({"event": "order_canceled", "symbol": symbol, "order_id": order_id})
+            log_event({
+                "event": "order_canceled",
+                "symbol": symbol,
+                "order_id": order_id,
+                "mode": self.mode,
+            })
             if self.on_canceled:
                 self.on_canceled(order)
         finally:
