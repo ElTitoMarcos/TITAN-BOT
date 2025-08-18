@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
+import random
 
 from simulation.fill_simulator import SimulatedFiller
 
@@ -65,15 +66,19 @@ class MassModeFiller(BaseModeFiller):
         exchange: Any,
         alpha: float = 0.6,
         beta: float = 0.9,
+        gamma: float = 1.0,
         base_latency: float = 0.25,
         overload_threshold: int = 5,
     ) -> None:
         super().__init__(exchange)
+        self.gamma = gamma
         self.sim = SimulatedFiller(
             alpha=alpha,
             beta=beta,
+            gamma=gamma,
             base_latency=base_latency * 1000,
             overload_threshold=overload_threshold,
+            rand=random,
         )
 
     # ------------------------------------------------------------------
